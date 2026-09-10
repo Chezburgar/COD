@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#0b0d0f" />
+<meta name="description" content="Operation Crossfire — a 5v5 online team deathmatch FPS that runs in your browser." />
+<title>Operation Crossfire — 5v5 Team Deathmatch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0d0f'/%3E%3Cpath d='M16 4v24M4 16h24' stroke='%23ff9d3c' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23ff9d3c' stroke-width='2'/%3E%3C/svg%3E" />
+  <script type="module" crossorigin src="./assets/index-wFQKy4z8.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/three-BAzOizmZ.js">
+  <link rel="modulepreload" crossorigin href="./assets/net-B_8Eti34.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-BwxC1-Bt.css">
+</head>
+<body>
+<canvas id="viewport"></canvas>
+
+<!-- ═══ BOOT / LOADING ═══ -->
+<div id="boot" class="screen">
+  <div class="boot-inner">
+    <div class="logo">
+      <span class="logo-mark"></span>
+      <h1>OPERATION <em>CROSSFIRE</em></h1>
+      <p class="tagline">5v5 · Team Deathmatch</p>
+    </div>
+    <div class="loadbar"><i id="load-fill"></i></div>
+    <p id="load-label" class="load-label">Initialising…</p>
+  </div>
+</div>
+
+<!-- ═══ MAIN MENU ═══ -->
+<div id="menu" class="screen hidden">
+  <div class="menu-grid">
+    <header class="menu-head">
+      <div class="logo small">
+        <span class="logo-mark"></span>
+        <h1>OPERATION <em>CROSSFIRE</em></h1>
+      </div>
+      <div class="profile">
+        <div class="rank"><span id="rank-level">1</span></div>
+        <div class="profile-meta">
+          <input id="callsign" maxlength="14" spellcheck="false" autocomplete="off" aria-label="Callsign" />
+          <div class="xpbar"><i id="xp-fill"></i></div>
+          <small id="xp-label">0 / 1000 XP</small>
+        </div>
+      </div>
+    </header>
+
+    <nav class="menu-tabs" role="tablist">
+      <button class="tab active" data-tab="play" role="tab">Play</button>
+      <button class="tab" data-tab="loadout" role="tab">Loadout</button>
+      <button class="tab" data-tab="settings" role="tab">Settings</button>
+      <button class="tab" data-tab="about" role="tab">Briefing</button>
+    </nav>
+
+    <section class="panel" data-panel="play">
+      <div class="cards">
+        <button class="card" id="btn-solo">
+          <span class="card-tag">Offline</span>
+          <h3>Combat Training</h3>
+          <p>Drop straight in against nine AI operators. No connection required.</p>
+          <span class="card-go">Deploy →</span>
+        </button>
+        <button class="card" id="btn-host">
+          <span class="card-tag">Online</span>
+          <h3>Host a Match</h3>
+          <p>Open a lobby and share the code. Empty slots are filled by bots.</p>
+          <span class="card-go">Create lobby →</span>
+        </button>
+        <button class="card" id="btn-join">
+          <span class="card-tag">Online</span>
+          <h3>Join a Match</h3>
+          <p>Enter a friend's six-character lobby code and deploy with them.</p>
+          <span class="card-go">Enter code →</span>
+        </button>
+      </div>
+
+      <div class="matchopts">
+        <label>Team size
+          <select id="opt-teamsize">
+            <option value="3">3v3</option>
+            <option value="4">4v4</option>
+            <option value="5" selected>5v5</option>
+            <option value="6">6v6</option>
+          </select>
+        </label>
+        <label>Score limit
+          <select id="opt-scorelimit">
+            <option value="30">30</option>
+            <option value="50">50</option>
+            <option value="75" selected>75</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <label>Time limit
+          <select id="opt-timelimit">
+            <option value="300">5:00</option>
+            <option value="600" selected>10:00</option>
+            <option value="900">15:00</option>
+          </select>
+        </label>
+        <label>Bot skill
+          <select id="opt-difficulty">
+            <option value="0">Recruit</option>
+            <option value="1" selected>Regular</option>
+            <option value="2">Hardened</option>
+            <option value="3">Veteran</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel hidden" data-panel="loadout">
+      <div class="loadout">
+        <div class="lo-list">
+          <h4>Primary</h4><div class="wpn-list" data-slot="primary"></div>
+          <h4>Secondary</h4><div class="wpn-list" data-slot="secondary"></div>
+          <h4>Tactical</h4><div class="wpn-list" data-slot="tactical"></div>
+          <h4>Perk</h4><div class="wpn-list" data-slot="perk"></div>
+        </div>
+        <div class="lo-detail">
+          <div id="lo-preview" class="lo-preview"></div>
+          <h3 id="lo-name">—</h3>
+          <p id="lo-desc" class="lo-desc"></p>
+          <div id="lo-stats" class="lo-stats"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel hidden" data-panel="settings">
+      <div class="settings"></div>
+    </section>
+
+    <section class="panel hidden" data-panel="about">
+      <div class="about">
+        <h3>Briefing</h3>
+        <p>Two five-operator squads, one contested industrial yard. First team to the score limit — or the higher score when the clock expires — takes the match.</p>
+        <h4>Controls</h4>
+        <div class="keys">
+          <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></div>
+          <div><kbd>Shift</kbd><span>Sprint</span></div>
+          <div><kbd>Ctrl</kbd><span>Crouch</span></div>
+          <div><kbd>Space</kbd><span>Jump / mantle</span></div>
+          <div><kbd>C</kbd><span>Slide (while sprinting)</span></div>
+          <div><kbd>LMB</kbd><span>Fire</span></div>
+          <div><kbd>RMB</kbd><span>Aim down sights / scope</span></div>
+          <div><kbd>R</kbd><span>Reload</span></div>
+          <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><span>Primary / secondary / knife</span></div>
+          <div><kbd>G</kbd><span>Frag grenade</span></div>
+          <div><kbd>Q</kbd><span>Tactical</span></div>
+          <div><kbd>V</kbd><span>Melee</span></div>
+          <div><kbd>F</kbd><span>Inspect weapon</span></div>
+          <div><kbd>Tab</kbd><span>Scoreboard</span></div>
+          <div><kbd>Esc</kbd><span>Pause</span></div>
+        </div>
+        <h4>Credits</h4>
+        <p class="credits">
+          Operator model: <strong>Meshy AI</strong> rigged character export supplied by the player.<br />
+          Level design referenced from <a href="https://sketchfab.com/3d-models/fps-low-poly-map-9312320aa2904e9381e224be93819fef" target="_blank" rel="noopener nofollow">“FPS low Poly Map”</a>
+          by <a href="https://sketchfab.com/Asad.Habib" target="_blank" rel="noopener nofollow">Asad.habib</a> on Sketchfab — the geometry here is an original rebuild in that layout and style.<br />
+          Rendering with <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>. Networking over WebRTC via PeerJS.<br />
+          Every sound in the game is synthesised in the browser at runtime with the Web Audio API — there are no audio files.
+        </p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ═══ LOBBY ═══ -->
+<div id="lobby" class="screen hidden">
+  <div class="lobby-box">
+    <h2 id="lobby-title">Lobby</h2>
+    <div class="code-row">
+      <span class="code-label">Lobby code</span>
+      <div class="code" id="lobby-code">------</div>
+      <button class="ghost" id="btn-copy-code">Copy</button>
+    </div>
+    <div id="join-row" class="join-row hidden">
+      <input id="join-code" maxlength="6" placeholder="CODE" spellcheck="false" autocomplete="off" />
+      <button class="primary" id="btn-join-go">Connect</button>
+    </div>
+    <div class="rosters">
+      <div class="roster" data-team="0"><h4>Ghost Team</h4><ul id="roster-0"></ul></div>
+      <div class="roster" data-team="1"><h4>Viper Team</h4><ul id="roster-1"></ul></div>
+    </div>
+    <p id="lobby-status" class="lobby-status">Waiting…</p>
+    <div class="lobby-actions">
+      <button class="ghost" id="btn-lobby-back">Leave</button>
+      <button class="primary" id="btn-lobby-start">Start match</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ HUD ═══ -->
+<div id="hud" class="hidden" aria-hidden="true">
+  <div id="crosshair"><i class="ch t"></i><i class="ch b"></i><i class="ch l"></i><i class="ch r"></i><i class="ch dot"></i></div>
+  <div id="hitmarker"></div>
+  <div id="damage-vignette"></div>
+  <div id="flash-overlay"></div>
+  <div id="hit-dirs"></div>
+
+  <div class="hud-top">
+    <div class="score-block">
+      <div class="team-score t0"><span class="tname">GHOST</span><b id="score-0">0</b></div>
+      <div class="clock" id="match-clock">10:00</div>
+      <div class="team-score t1"><b id="score-1">0</b><span class="tname">VIPER</span></div>
+    </div>
+    <div class="score-bar"><i id="score-bar-0"></i><i id="score-bar-1"></i></div>
+  </div>
+
+  <div id="killfeed"></div>
+  <div id="obituary"></div>
+  <div id="streak-banner"></div>
+
+  <div class="hud-bottom-left">
+    <canvas id="minimap" width="220" height="220"></canvas>
+    <div class="compass" id="compass"></div>
+  </div>
+
+  <div class="hud-bottom-right">
+    <div class="weapon-block">
+      <div class="wname" id="hud-weapon">—</div>
+      <div class="ammo"><b id="hud-ammo">30</b><span id="hud-reserve">/ 120</span></div>
+      <div class="firemode" id="hud-firemode">AUTO</div>
+    </div>
+    <div class="equipment">
+      <div class="eq" id="eq-frag"><span class="eq-icon frag"></span><b>2</b></div>
+      <div class="eq" id="eq-tac"><span class="eq-icon tac"></span><b>2</b></div>
+    </div>
+  </div>
+
+  <div class="hud-bottom-center">
+    <div class="health"><i id="health-fill"></i></div>
+  </div>
+
+  <div id="streak-tray"></div>
+  <div id="reload-prompt" class="prompt hidden">RELOAD <kbd>R</kbd></div>
+  <div id="interact-prompt" class="prompt hidden"></div>
+  <div id="ping-badge">—</div>
+</div>
+
+<!-- ═══ SCOPE OVERLAY (drawn over the RTT scope render) ═══ -->
+<div id="scope-frame" class="hidden"></div>
+
+<!-- ═══ KILLCAM / RESPAWN ═══ -->
+<div id="deathscreen" class="overlay hidden">
+  <div class="death-inner">
+    <h2>YOU WERE ELIMINATED</h2>
+    <p id="death-by">—</p>
+    <div class="respawn"><span>Respawning in</span> <b id="respawn-count">5</b></div>
+  </div>
+</div>
+
+<!-- ═══ SCOREBOARD ═══ -->
+<div id="scoreboard" class="overlay hidden">
+  <div class="sb-box">
+    <div class="sb-head"><h2>Team Deathmatch</h2><span id="sb-map">Crossfire Yard</span></div>
+    <div class="sb-teams">
+      <div class="sb-team t0"><header><h3>GHOST TEAM</h3><b id="sb-score-0">0</b></header><table><thead><tr><th>Operator</th><th>K</th><th>D</th><th>A</th><th>Score</th><th>Ping</th></tr></thead><tbody id="sb-body-0"></tbody></table></div>
+      <div class="sb-team t1"><header><h3>VIPER TEAM</h3><b id="sb-score-1">0</b></header><table><thead><tr><th>Operator</th><th>K</th><th>D</th><th>A</th><th>Score</th><th>Ping</th></tr></thead><tbody id="sb-body-1"></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PAUSE ═══ -->
+<div id="pause" class="overlay hidden">
+  <div class="pause-box">
+    <h2>PAUSED</h2>
+    <button class="primary" id="btn-resume">Resume</button>
+    <button class="ghost" id="btn-pause-settings">Settings</button>
+    <button class="ghost danger" id="btn-quit">Leave match</button>
+    <div class="pause-settings hidden"><div class="settings"></div></div>
+  </div>
+</div>
+
+<!-- ═══ MATCH END ═══ -->
+<div id="matchend" class="overlay hidden">
+  <div class="end-box">
+    <h2 id="end-title">VICTORY</h2>
+    <p id="end-sub">Ghost Team 75 — 61 Viper Team</p>
+    <div class="end-stats" id="end-stats"></div>
+    <div class="end-actions">
+      <button class="primary" id="btn-rematch">Play again</button>
+      <button class="ghost" id="btn-tomenu">Main menu</button>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<div id="unsupported" class="overlay hidden"><div class="pause-box"><h2>WebGL 2 required</h2><p>This browser can't run the renderer. Try a recent Chrome, Edge, Firefox or Safari on desktop.</p></div></div>
+
+</body>
+</html>
