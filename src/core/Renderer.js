@@ -154,6 +154,9 @@ const GradeShader = {
   `,
 };
 
+/** Shared by the sky shader and the directional light so they can't drift apart. */
+const SUN_DIR = new THREE.Vector3(0.36, 0.78, -0.51).normalize();
+
 export const QUALITY = {
   low:    { shadow: 1024, bloom: false, smaa: false, scale: 0.72, scopeRT: 512,  aniso: 2, shadowType: THREE.BasicShadowMap },
   medium: { shadow: 2048, bloom: true,  smaa: false, scale: 0.9,  scopeRT: 768,  aniso: 4, shadowType: THREE.PCFShadowMap },
@@ -231,7 +234,7 @@ export class Renderer {
           uMid:    { value: new THREE.Color(0x9fc0dd) },
           uHorizon:{ value: new THREE.Color(0xe4d3b4) },
           uGround: { value: new THREE.Color(0x7d7568) },
-          uSunDir: { value: new THREE.Vector3(0.42, 0.44, -0.79).normalize() },
+          uSunDir: { value: SUN_DIR.clone() },
           uSunCol: { value: new THREE.Color(0xfff0d0) },
         },
         vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -274,8 +277,8 @@ export class Renderer {
   }
 
   _buildLights() {
-    const sunDir = new THREE.Vector3(0.42, 0.44, -0.79).normalize();
-    const sun = new THREE.DirectionalLight(0xfff1d6, 3.1);
+    const sunDir = SUN_DIR.clone();
+    const sun = new THREE.DirectionalLight(0xfff4de, 3.3);
     sun.position.copy(sunDir).multiplyScalar(90);
     sun.castShadow = true;
     const q = QUALITY[this.quality];
@@ -297,13 +300,13 @@ export class Renderer {
     this.scene.add(new THREE.AmbientLight(0x6e7a8a, 0.55));
 
     // The view model gets its own rig so it reads well against any backdrop.
-    const vmKey = new THREE.DirectionalLight(0xfff3dd, 3.0);
+    const vmKey = new THREE.DirectionalLight(0xfff3dd, 2.7);
     vmKey.position.set(-0.7, 1.1, 0.8);
-    const vmFill = new THREE.DirectionalLight(0x9dc0e4, 1.5);
+    const vmFill = new THREE.DirectionalLight(0x9dc0e4, 1.25);
     vmFill.position.set(1.0, -0.1, -0.5);
     const vmRim = new THREE.DirectionalLight(0xffd9a8, 1.1);
     vmRim.position.set(0.2, 0.4, -1.0);
-    this.vmScene.add(vmKey, vmFill, vmRim, new THREE.AmbientLight(0x8b93a0, 1.2));
+    this.vmScene.add(vmKey, vmFill, vmRim, new THREE.AmbientLight(0x8b93a0, 0.9));
   }
 
   _buildComposer() {

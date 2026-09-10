@@ -37,12 +37,12 @@ const VM_SCALE = 0.7;
 
 /* Resting pose per family (hip fire). */
 const HIP = {
-  default:  { pos: [0.132, -0.140, -0.34], rot: [0.015, 0.055, -0.02] },
-  pistol:   { pos: [0.105, -0.125, -0.30], rot: [0.02, 0.06, -0.02] },
-  knife:    { pos: [0.150, -0.145, -0.26], rot: [0.16, -0.38, 0.24] },
-  grenade:  { pos: [0.145, -0.165, -0.28], rot: [0.08, -0.16, 0.08] },
-  sniper:   { pos: [0.148, -0.150, -0.38], rot: [0.015, 0.05, -0.02] },
-  lmg:      { pos: [0.150, -0.160, -0.36], rot: [0.015, 0.05, -0.02] },
+  default:  { pos: [0.126, -0.118, -0.33], rot: [0.015, 0.055, -0.02] },
+  pistol:   { pos: [0.102, -0.104, -0.29], rot: [0.02, 0.06, -0.02] },
+  knife:    { pos: [0.146, -0.122, -0.26], rot: [0.16, -0.38, 0.24] },
+  grenade:  { pos: [0.140, -0.140, -0.28], rot: [0.08, -0.16, 0.08] },
+  sniper:   { pos: [0.142, -0.126, -0.37], rot: [0.015, 0.05, -0.02] },
+  lmg:      { pos: [0.144, -0.136, -0.35], rot: [0.015, 0.05, -0.02] },
 };
 
 const _v = new THREE.Vector3();
@@ -228,7 +228,9 @@ export class ViewModel {
     // distance from the eye. Offsets are scaled because the rig is scaled.
     const s = this.model.userData.sight;
     const k = VM_SCALE;
-    const adsDist = weapon.sight === 'scope' ? 0.185 : 0.235;
+    // Far enough out that the receiver doesn't loom; the sight stays centred
+    // either way because the pose is solved from it.
+    const adsDist = weapon.sight === 'scope' ? 0.24 : 0.30;
     this.adsPos = new THREE.Vector3(-s.x * k, -s.y * k, -adsDist - s.z * k);
     this.adsRot = new THREE.Euler(0, 0, 0);
 

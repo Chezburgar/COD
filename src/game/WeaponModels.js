@@ -13,11 +13,11 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const M = {
-  gunmetal: () => new THREE.MeshStandardMaterial({ color: 0x40454b, metalness: 0.72, roughness: 0.42 }),
-  black:    () => new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.35, roughness: 0.62 }),
-  polymer:  () => new THREE.MeshStandardMaterial({ color: 0x4a4e54, metalness: 0.05, roughness: 0.72 }),
+  gunmetal: () => new THREE.MeshStandardMaterial({ color: 0x35393f, metalness: 0.74, roughness: 0.4 }),
+  black:    () => new THREE.MeshStandardMaterial({ color: 0x232629, metalness: 0.35, roughness: 0.62 }),
+  polymer:  () => new THREE.MeshStandardMaterial({ color: 0x3e4249, metalness: 0.05, roughness: 0.72 }),
   tan:      () => new THREE.MeshStandardMaterial({ color: 0x93805f, metalness: 0.04, roughness: 0.8 }),
-  steel:    () => new THREE.MeshStandardMaterial({ color: 0x767d86, metalness: 0.82, roughness: 0.3 }),
+  steel:    () => new THREE.MeshStandardMaterial({ color: 0x5c626a, metalness: 0.86, roughness: 0.32 }),
   brass:    () => new THREE.MeshStandardMaterial({ color: 0xb08d3e, metalness: 0.9, roughness: 0.32 }),
   wood:     () => new THREE.MeshStandardMaterial({ color: 0x7d5730, metalness: 0.0, roughness: 0.68 }),
   glass:    () => new THREE.MeshStandardMaterial({
