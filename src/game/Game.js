@@ -240,8 +240,11 @@ export class Game {
 
   /* ══ frame ═══════════════════════════════════════════════════════════════ */
 
-  update(dt, now) {
+  update(dt) {
     this.time += dt;
+    // Everything downstream runs on the match clock so timers set from the UI
+    // (killstreaks, respawns) and timers set inside the simulation agree.
+    const now = this.time;
     if (this.state === 'live') {
       this.clock = Math.max(0, this.clock - dt);
       if (this.clock <= 0) this.endMatch();
@@ -276,6 +279,7 @@ export class Game {
     }
 
     /* ── bots + remotes ──────────────────────────────────────────── */
+    this.nav.beginFrame(2);
     const ctx = {
       now, world: this.world, nav: this.nav, combatants: this.combatants,
       coverPoints: this.map.coverPoints,

@@ -194,12 +194,13 @@ export class Menu {
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.ACESFilmicToneMapping;
     const scene = new THREE.Scene();
-    const cam = new THREE.PerspectiveCamera(38, 1, 0.01, 20);
-    cam.position.set(0.05, 0.06, 0.95);
-    cam.lookAt(0, 0.02, 0);
-    const key = new THREE.DirectionalLight(0xfff0d8, 3.2); key.position.set(-1, 1.4, 1.6);
-    const rim = new THREE.DirectionalLight(0x77aaff, 2.0); rim.position.set(1.6, 0.4, -1.4);
-    scene.add(key, rim, new THREE.AmbientLight(0x6a7480, 1.1));
+    const cam = new THREE.PerspectiveCamera(36, 1, 0.01, 20);
+    cam.position.set(0, 0.14, 0.92);
+    cam.lookAt(0, -0.01, 0);
+    const key = new THREE.DirectionalLight(0xfff0d8, 3.6); key.position.set(-1, 1.4, 1.6);
+    const rim = new THREE.DirectionalLight(0x88b4ff, 2.6); rim.position.set(1.6, 0.4, -1.4);
+    const under = new THREE.DirectionalLight(0xffc98a, 1.0); under.position.set(0.2, -1, 0.6);
+    scene.add(key, rim, under, new THREE.AmbientLight(0x7b8593, 1.5));
     const pivot = new THREE.Group();
     scene.add(pivot);
     this.previewRenderer = { r, scene, cam, pivot, canvas, host };
@@ -234,11 +235,14 @@ export class Menu {
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());
     m.position.sub(centre);
-    const scale = 0.62 / Math.max(size.x, size.y, size.z);
-    m.scale.setScalar(scale);
-    m.rotation.y = -0.5;
-    p.pivot.add(m);
-    p.pivot.rotation.y = 0.4;
+    const holder = new THREE.Group();
+    holder.add(m);
+    // Barrels run along -Z, so turn the model broadside — otherwise the
+    // preview is a view straight down the muzzle.
+    holder.rotation.y = Math.PI / 2;
+    holder.scale.setScalar(0.68 / Math.max(size.x, size.y, size.z));
+    p.pivot.add(holder);
+    p.pivot.rotation.y = -0.42;
   }
 
   /* ── settings ──────────────────────────────────────────────────────────── */

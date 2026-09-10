@@ -13,6 +13,7 @@ import * as THREE from 'three';
 const CELL = 1.0;
 const STAND_CLEARANCE = 1.85;
 const STEP_UP = 0.62;
+const MAX_SLOPE_STEP = 1.3;
 const MAX_LAYERS = 4;
 
 export class NavGrid {
@@ -89,19 +90,63 @@ export class NavGrid {
         const diag = dx !== 0 && dz !== 0;
         if (diag && !(this._hasNear(n.ix + dx, n.iz, n.y) && this._hasNear(n.ix, n.iz + dz, n.y))) continue;
         for (const m of this.cells[this.cellIndex(nx, nz)]) {
-          if (Math.abs(m.y - n.y) > STEP_UP) continue;
+          const drop = Math.abs(m.y - n.y);
+          // A metre of ramp can rise further than a step height, so anything
+          // over the step limit is accepted only if the surface between the
+          // two cells is actually continuous — a slope, not a ledge.
+          if (drop > STEP_UP && !(drop <= MAX_SLOPE_STEP && this._continuous(n, m))) continue;
           if (this._blocked(n, m)) continue;
-          n.links.push({ node: m, cost: (diag ? 1.414 : 1) * CELL + Math.abs(m.y - n.y) * 1.5 });
+          n.links.push({ node: m, cost: (diag ? 1.414 : 1) * CELL + drop * 1.5 });
         }
       }
     }
 
+    this._computeComponents();
     this.walkable = this.nodes.length;
+  }
+
+  /**
+   * Flood-fills the link graph. Rooftops and ledges with no route up form
+   * their own islands; knowing which island a node is on lets a path request
+   * fail instantly instead of exhausting the search, and lets bots pick goals
+   * they can actually walk to.
+   */
+  _computeComponents() {
+    for (const n of this.nodes) n.comp = -1;
+    const stack = [];
+    this.components = [];
+    let id = 0;
+    for (const start of this.nodes) {
+      if (start.comp !== -1) continue;
+      const members = [];
+      stack.length = 0;
+      stack.push(start);
+      start.comp = id;
+      while (stack.length) {
+        const n = stack.pop();
+        members.push(n);
+        for (const l of n.links) {
+          if (l.node.comp === -1) { l.node.comp = id; stack.push(l.node); }
+        }
+      }
+      this.components.push({ id, size: members.length, nodes: members });
+      id++;
+    }
+    this.components.sort((a, b) => b.size - a.size);
+    this.mainComponent = this.components[0]?.id ?? 0;
   }
 
   _hasNear(ix, iz, y) {
     if (ix < 0 || iz < 0 || ix >= this.w || iz >= this.d) return false;
     return this.cells[this.cellIndex(ix, iz)].some((m) => Math.abs(m.y - y) <= STEP_UP);
+  }
+
+  /** True when the ground between two cells rises smoothly rather than stepping. */
+  _continuous(a, b) {
+    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+    const lo = Math.min(a.y, b.y), hi = Math.max(a.y, b.y);
+    const mid = this.collision.floorAt(mx, mz, hi + 0.25, 0.08);
+    return mid !== null && mid > lo - 0.22 && mid < hi + 0.22;
   }
 
   /** Solid geometry between two adjacent nodes at body height? */
@@ -136,53 +181,106 @@ export class NavGrid {
     return best;
   }
 
-  randomNode(rng = Math.random) {
-    return this.nodes[(rng() * this.nodes.length) | 0];
+  /** Random walkable node, optionally restricted to one connected island. */
+  randomNode(rng = Math.random, comp) {
+    if (comp === undefined) return this.nodes[(rng() * this.nodes.length) | 0];
+    const c = this.components.find((x) => x.id === comp);
+    const pool = c ? c.nodes : this.nodes;
+    return pool[(rng() * pool.length) | 0];
   }
 
   /**
    * A* between two world positions. Returns smoothed waypoints, or null.
    * `budget` caps expansions so a hopeless request can't stall a frame.
    */
-  findPath(from, to, budget = 2600) {
+  findPath(from, to, budget = 4500) {
     const s = this.nearest(from), g = this.nearest(to);
     if (!s || !g) return null;
     if (s === g) return [new THREE.Vector3(g.x, g.y, g.z)];
+    if (s.comp !== g.comp) return null;      // different islands: no route exists
 
     const gen = ++this._gen;
-    const open = this._open;
-    open.length = 0;
+    const heap = this._open;
+    heap.length = 0;
     s._gen = gen; s._g = 0; s._f = this._h(s, g); s._parent = null; s._closed = false;
-    open.push(s);
+    this._push(s);
     let expansions = 0;
 
-    while (open.length) {
-      // Linear scan for the lowest f — the graph is small enough that a binary
-      // heap costs more in allocation churn than it saves here.
-      let bi = 0;
-      for (let i = 1; i < open.length; i++) if (open[i]._f < open[bi]._f) bi = i;
-      const cur = open[bi];
-      open[bi] = open[open.length - 1];
-      open.pop();
+    while (heap.length) {
+      const cur = this._pop();
       if (cur === g) return this._reconstruct(cur);
       cur._closed = true;
       if (++expansions > budget) break;
 
       for (const link of cur.links) {
         const nb = link.node;
-        if (nb._gen !== gen) { nb._gen = gen; nb._g = Infinity; nb._closed = false; nb._parent = null; }
+        if (nb._gen !== gen) {
+          nb._gen = gen; nb._g = Infinity; nb._closed = false; nb._parent = null; nb._heap = -1;
+        }
         if (nb._closed) continue;
         const ng = cur._g + link.cost;
         if (ng < nb._g) {
           nb._g = ng;
           nb._f = ng + this._h(nb, g);
           nb._parent = cur;
-          if (!open.includes(nb)) open.push(nb);
+          if (nb._heap >= 0) this._sift(nb._heap);
+          else this._push(nb);
         }
       }
     }
     return null;
   }
+
+  /* Binary heap keyed on the node's f-score. Nodes carry their own index so a
+     decrease-key is a sift instead of a linear search. */
+  _push(node) {
+    const h = this._open;
+    node._heap = h.length;
+    h.push(node);
+    this._sift(node._heap);
+  }
+
+  _sift(i) {
+    const h = this._open;
+    const node = h[i];
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (h[parent]._f <= node._f) break;
+      h[i] = h[parent];
+      h[i]._heap = i;
+      i = parent;
+    }
+    h[i] = node;
+    node._heap = i;
+  }
+
+  _pop() {
+    const h = this._open;
+    const top = h[0];
+    top._heap = -1;
+    const last = h.pop();
+    if (h.length) {
+      h[0] = last;
+      last._heap = 0;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1, r = l + 1;
+        let m = i;
+        if (l < h.length && h[l]._f < h[m]._f) m = l;
+        if (r < h.length && h[r]._f < h[m]._f) m = r;
+        if (m === i) break;
+        h[i] = h[m]; h[i]._heap = i;
+        h[m] = last; last._heap = m;
+        i = m;
+      }
+    }
+    return top;
+  }
+
+  /** Per-frame pathfinding budget so a squad can't all repath on one frame. */
+  beginFrame(maxPaths = 2) { this._pathBudget = maxPaths; }
+  canPath() { return (this._pathBudget ?? 99) > 0; }
+  spendPath() { if (this._pathBudget !== undefined) this._pathBudget--; }
 
   _h(a, b) {
     const dx = a.x - b.x, dz = a.z - b.z, dy = a.y - b.y;

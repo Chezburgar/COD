@@ -189,6 +189,7 @@ function beginMatch() {
   $('#lobby').classList.add('hidden');
   $('#matchend').classList.add('hidden');
   hud.show(true);
+  hud.setPing(net.role ? '— ms' : 'OFFLINE');
   audio.stopMenuBed();
   game.start(player);
   hud.setStreakTray([]);
@@ -339,8 +340,11 @@ async function startHosting() {
     $('#lobby-code').textContent = code;
     $('#lobby-status').textContent = 'Waiting for players. Share the code — empty slots are filled by bots.';
   } catch (e) {
-    $('#lobby-status').textContent = `Could not open a lobby: ${e.message}`;
-    hud.toast('Lobby failed — you can still play offline.', 'err');
+    $('#lobby-code').textContent = '——';
+    $('#lobby-status').textContent =
+      `Could not reach the matchmaking broker (${e.message}) — online play needs an open ` +
+      'connection to peerjs.com. Combat Training still works offline.';
+    hud.toast('Lobby failed — Combat Training still works.', 'err');
     return;
   }
 
@@ -515,11 +519,12 @@ let scoreboardTick = 0;
 
 function loop(nowMs) {
   requestAnimationFrame(loop);
-  const dt = Math.min((nowMs - last) / 1000, 0.1);
+  const realDt = (nowMs - last) / 1000;
+  const dt = Math.min(realDt, 0.1);
   last = nowMs;
   const t = nowMs / 1000;
 
-  fpsAccum += dt; fpsFrames++;
+  fpsAccum += realDt; fpsFrames++;
   if (fpsAccum > 0.5) { fps = fpsFrames / fpsAccum; fpsAccum = 0; fpsFrames = 0; }
 
   const fx = {
@@ -529,7 +534,7 @@ function loop(nowMs) {
 
   if (phase === 'match' && game) {
     if (!paused && !window.__dbg?.frozen) {
-      game.update(dt, t);
+      game.update(dt);
       if (net.role === 'host') net.hostTick(dt, game);
       hud.update(dt, game, player);
       if (minimap) minimap.draw(game, t);
@@ -572,8 +577,7 @@ let perfEl = null;
 function updatePerfBadge() {
   if (!perfEl) {
     perfEl = document.createElement('div');
-    perfEl.id = 'ping-badge';
-    perfEl.style.cssText = 'position:fixed;top:14px;left:120px;z-index:50';
+    perfEl.id = 'perf-badge';
     document.body.appendChild(perfEl);
   }
   const info = renderer.renderer.info;

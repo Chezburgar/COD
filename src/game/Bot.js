@@ -130,6 +130,25 @@ export class Bot extends Combatant {
     const enemies = ctx.combatants.filter((c) => c.team !== this.team && c.alive);
     const allies = ctx.combatants.filter((c) => c.team === this.team && c !== this);
 
+    /* ── flashed ─────────────────────────────────────────────────────── */
+    const blind = now < this.blindUntil;
+    if (blind) {
+      // Can't see: drop the target, spray the aim, and back away from where
+      // the bang came from rather than standing still.
+      this.target = null;
+      this.pendingTarget = null;
+      this.aimYaw += (Math.random() - 0.5) * dt * 2.2;
+      this.aimPitch = clamp(this.aimPitch + (Math.random() - 0.5) * dt, -0.6, 0.6);
+      const c0 = this.cmd;
+      c0.dt = dt;
+      c0.moveX = Math.sin(now * 3 + this.id) * 0.6;
+      c0.moveZ = -0.5;
+      c0.yaw = this.aimYaw;
+      c0.pitch = this.aimPitch;
+      c0.buttons = BTN.crouch;
+      return c0;
+    }
+
     /* ── target selection ───────────────────────────────────────────── */
     let best = null, bestScore = -Infinity;
     for (const e of enemies) {
@@ -375,6 +394,8 @@ export class Bot extends Combatant {
   _updateGoal(dt, ctx, enemies, allies, engageDist) {
     const { now, nav, coverPoints, world } = ctx;
     const needNew = !this.hasGoal || this.pos.distanceToSquared(this.goal) < 2.6 || now > this.goalExpire;
+    const here = nav.nearest(this.pos);
+    const island = here ? here.comp : undefined;
 
     if (this.state === STATE.ENGAGE && this.target) {
       // Hold ground and strafe; only reposition if badly out of range.
@@ -399,6 +420,8 @@ export class Bot extends Combatant {
         const cp = pick(coverPoints);
         const d = this.pos.distanceTo(_v.set(cp.x, this.pos.y, cp.z));
         if (d > 34) continue;
+        const cn = nav.nearest(_v.set(cp.x, this.pos.y, cp.z), 3);
+        if (!cn || cn.comp !== island) continue;
         let s = -d * 0.6;
         if (this.hasLastKnown) s += _v.set(cp.x, this.pos.y, cp.z).distanceTo(this.lastKnown) * 0.9;
         if (s > bestS) { bestS = s; bestP = cp; }
@@ -431,7 +454,7 @@ export class Bot extends Combatant {
     if (needNew) {
       let bestNode = null, bestS = -Infinity;
       for (let i = 0; i < 14; i++) {
-        const n = nav.randomNode();
+        const n = nav.randomNode(Math.random, island);
         const d = this.pos.distanceTo(_v.set(n.x, n.y, n.z));
         if (d < 9 || d > 62) continue;
         let s = -Math.abs(d - 28) * 0.5;
@@ -457,10 +480,19 @@ export class Bot extends Combatant {
     if (!this.hasGoal) return null;
 
     if (!this.path || now > this.repathAt) {
-      this.path = nav.findPath(this.pos, this.goal);
-      this.pathIdx = 0;
-      this.repathAt = now + rand(0.8, 1.8);
-      if (!this.path) { this.hasGoal = false; return null; }
+      // Respect the frame's pathfinding budget: keep following the old route
+      // for another moment rather than every bot solving on the same frame.
+      if (!nav.canPath()) {
+        this.repathAt = now + rand(0.1, 0.25);
+        if (!this.path) return null;
+      } else {
+        nav.spendPath();
+        const found = nav.findPath(this.pos, this.goal);
+        this.pathIdx = 0;
+        this.repathAt = now + rand(0.9, 2.0);
+        if (!found) { this.path = null; this.hasGoal = false; return null; }
+        this.path = found;
+      }
     }
     while (this.pathIdx < this.path.length) {
       const wp = this.path[this.pathIdx];

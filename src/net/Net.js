@@ -73,8 +73,17 @@ export class Net {
 
   async host(code = makeRoomCode()) {
     this.code = code;
+    this.closed = false;
+    try {
+      this.peer = await this._newPeer(PREFIX + code);
+    } catch (e) {
+      // Leave the transport clean so the player can simply try again.
+      this.role = null;
+      this.code = null;
+      this.peer = null;
+      throw e;
+    }
     this.role = 'host';
-    this.peer = await this._newPeer(PREFIX + code);
     this.nextPlayerId = 2;
 
     this.peer.on('connection', (conn) => {
@@ -182,16 +191,25 @@ export class Net {
 
   async join(code, name, loadout) {
     this.code = code.toUpperCase();
+    this.closed = false;
+    let conn;
+    try {
+      this.peer = await this._newPeer(null);
+      conn = this.peer.connect(PREFIX + this.code, { reliable: true, serialization: 'binary' });
+      this.hostConn = conn;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`No lobby found with code ${this.code}.`)), 14000);
+        conn.on('open', () => { clearTimeout(timer); resolve(); });
+        conn.on('error', (e) => { clearTimeout(timer); reject(e); });
+      });
+    } catch (e) {
+      try { this.peer?.destroy(); } catch { /* already gone */ }
+      this.peer = null;
+      this.hostConn = null;
+      this.role = null;
+      throw e;
+    }
     this.role = 'client';
-    this.peer = await this._newPeer(null);
-    const conn = this.peer.connect(PREFIX + this.code, { reliable: true, serialization: 'binary' });
-    this.hostConn = conn;
-
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`No lobby found with code ${this.code}.`)), 14000);
-      conn.on('open', () => { clearTimeout(timer); resolve(); });
-      conn.on('error', (e) => { clearTimeout(timer); reject(e); });
-    });
 
     conn.on('data', (msg) => this._clientMessage(msg));
     conn.on('close', () => this.emit('hostLost'));

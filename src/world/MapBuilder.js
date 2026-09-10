@@ -242,12 +242,34 @@ export function buildMap() {
     solid(sx, 4.6, -24.5, sx + wh.t, wh.h, -20.5, 'plaster');
     solid(sx, 0, -20.5, sx + wh.t, wh.h, wh.z1, 'plaster');
   }
-  // Roof slab (walkable) + parapet.
-  solid(wh.x0, wh.h, wh.z0, wh.x1, wh.h + 0.5, wh.z1, 'roof');
+  // Roof slab (walkable) + parapet, with a gap at each end where the external
+  // stair ramps arrive.
+  const ROOF = wh.h + 0.5;
+  const gapZ0 = wh.z0 + 0.2, gapZ1 = wh.z0 + 3.2;
+  solid(wh.x0, wh.h, wh.z0, wh.x1, ROOF, wh.z1, 'roof');
   for (const [a, b, c, d] of [
     [wh.x0, wh.z0, wh.x1, wh.z0 + 0.35], [wh.x0, wh.z1 - 0.35, wh.x1, wh.z1],
-    [wh.x0, wh.z0, wh.x0 + 0.35, wh.z1], [wh.x1 - 0.35, wh.z0, wh.x1, wh.z1],
-  ]) solid(a, wh.h + 0.5, b, c, wh.h + 1.4, d, 'concrete');
+  ]) solid(a, ROOF, b, c, ROOF + 0.9, d, 'concrete');
+  for (const px of [wh.x0, wh.x1 - 0.35]) {
+    solid(px, ROOF, gapZ1, px + 0.35, ROOF + 0.9, wh.z1, 'concrete');
+  }
+  // Ramps up the outside of each end wall.
+  solid(wh.x0 - 12, 0, gapZ0, wh.x0, ROOF, gapZ1, 'grate', { ramp: { axis: 'x', dir: 1 } });
+  solid(wh.x1, 0, gapZ0, wh.x1 + 12, ROOF, gapZ1, 'grate', { ramp: { axis: 'x', dir: -1 } });
+  for (const [rx0, rx1, dir] of [[wh.x0 - 12, wh.x0, 1], [wh.x1, wh.x1 + 12, -1]]) {
+    // Handrail along the open side of each flight: posts plus short sloped
+    // segments that follow the ramp rather than one bar floating over it.
+    const yAt = (x) => (dir > 0 ? (x - rx0) / 12 : (rx1 - x) / 12) * ROOF;
+    for (let x = rx0 + 0.4; x < rx1; x += 1.6) {
+      deco(x - 0.06, yAt(x), gapZ1 - 0.14, x + 0.06, yAt(x) + 1.02, gapZ1, 'darkmetal');
+      const x2 = Math.min(x + 1.6, rx1);
+      const lo = Math.min(yAt(x), yAt(x2)) + 0.92;
+      const hi = Math.max(yAt(x), yAt(x2)) + 1.02;
+      deco(x, lo, gapZ1 - 0.13, x2, hi, gapZ1 - 0.01, 'darkmetal', { ramp: { axis: 'x', dir } });
+    }
+  }
+  cover(wh.x0 - 6, gapZ1 + 1.2, 0, 1);
+  cover(wh.x1 + 6, gapZ1 + 1.2, 0, 1);
   // Roof furniture: vents and an AC unit, doubles as cover up top.
   solid(-8, wh.h + 0.5, -26, -4.5, wh.h + 2.1, -22.5, 'darkmetal'); cover(-6, -21.5, 0, 1);
   solid(5, wh.h + 0.5, -20, 8.5, wh.h + 1.7, -17, 'darkmetal');     cover(6.7, -16, 0, 1);
@@ -267,8 +289,19 @@ export function buildMap() {
     deco(x, 4.1, wh.z0 + 4.0, x + 0.14, 5.2, wh.z0 + 4.2, 'darkmetal');
   }
   deco(wh.x0 + 0.7, 5.05, wh.z0 + 4.0, wh.x1 - 0.7, 5.2, wh.z0 + 4.2, 'darkmetal');
-  solid(wh.x0 + 0.7, 0, wh.z0 + 4.2, wh.x0 + 6.2, 4.1, wh.z0 + 6.6, 'grate', { ramp: { axis: 'x', dir: 1 } });
-  solid(wh.x1 - 6.2, 0, wh.z0 + 4.2, wh.x1 - 0.7, 4.1, wh.z0 + 6.6, 'grate', { ramp: { axis: 'x', dir: -1 } });
+  // Stairs up to the catwalk. Each gets a flat landing at exactly catwalk
+  // height that overlaps the walkway, so there is never a slab hanging low
+  // over the top of the ramp — that pinch is what makes a route unwalkable.
+  for (const [lx0, lx1] of [[wh.x0 + 0.7, wh.x0 + 4.4], [wh.x1 - 4.4, wh.x1 - 0.7]]) {
+    solid(lx0, 3.9, wh.z0 + 3.0, lx1, 4.1, wh.z0 + 5.6, 'grate');
+    solid(lx0, 0, wh.z0 + 5.6, lx1, 4.1, wh.z0 + 12.6, 'grate', { ramp: { axis: 'z', dir: -1 } });
+    for (let z = wh.z0 + 5.8; z < wh.z0 + 12.4; z += 1.6) {
+      const y = 4.1 * (1 - (z - (wh.z0 + 5.6)) / 7);
+      for (const rx of [lx0, lx1 - 0.12]) {
+        deco(rx, y, z - 0.06, rx + 0.12, y + 1.0, z + 0.06, 'darkmetal');
+      }
+    }
+  }
 
   // Interior crates.
   const crateColors = ['crateRed', 'crateBlue', 'crateGreen', 'crateYell'];
@@ -303,14 +336,16 @@ export function buildMap() {
   };
 
   const CC = ['crateRed', 'crateBlue', 'crateGreen', 'crateYell', 'crateGrey'];
-  // Row 1 — long containers forming a wall with a gap in the middle.
+  // Row 1 — a wall of containers with gaps to push through. The two single
+  // stacks at x = ±9 are the ones the ramps climb onto, so nothing sits above.
   container(-24, 0, 14.5, 12.19, 'x', CC[0]);
   container(-24, CH, 14.5, 12.19, 'x', CC[3]);
-  container(-8.5, 0, 14.5, 12.19, 'x', CC[1]);
-  container(9, 0, 14.5, 6.06, 'x', CC[2]);
-  container(9, CH, 14.5, 6.06, 'x', CC[4]);
   container(24, 0, 14.5, 12.19, 'x', CC[2]);
   container(24, CH, 14.5, 12.19, 'x', CC[1]);
+  container(-9, 0, 14.5, 6.06, 'x', CC[1]);
+  container(9, 0, 14.5, 6.06, 'x', CC[2]);
+  container(0, 0, 14.5, 6.06, 'x', CC[4]);
+  container(0, CH, 14.5, 6.06, 'x', CC[3]);
   // Row 2 — perpendicular, creating a grid of corridors.
   container(-30, 0, 23, 12.19, 'z', CC[4]);
   container(-16, 0, 22, 6.06, 'z', CC[2]);
@@ -325,10 +360,15 @@ export function buildMap() {
   container(8, 0, 29.5, 6.06, 'x', CC[0]);
   container(22, 0, 29.5, 12.19, 'x', CC[3]);
 
-  // Stair of crates onto the stacked containers (both sides, mirrored).
+  // Pallet ramps onto the container tops, mirrored so both spawns get one.
   for (const s of [-1, 1]) {
-    solid(s * 18 - 1.3, 0, 10.6, s * 18 + 1.3, 1.3, 13.2, 'wood');
-    solid(s * 18 - 1.3, 1.3, 12.0, s * 18 + 1.3, 2.62, 13.2, 'wood');
+    solid(s * 9 - 1.4, 0, 9.4, s * 9 + 1.4, CH, 13.3, 'wood', { ramp: { axis: 'z', dir: 1 } });
+    for (let z = 9.8; z < 13.2; z += 0.85) {
+      const y = ((z - 9.4) / 3.9) * CH;
+      deco(s * 9 - 1.5, y - 0.06, z - 0.06, s * 9 - 1.36, y + 0.9, z + 0.06, 'darkmetal');
+      deco(s * 9 + 1.36, y - 0.06, z - 0.06, s * 9 + 1.5, y + 0.9, z + 0.06, 'darkmetal');
+    }
+    cover(s * 9, 8.6, 0, -1);
   }
   // Gantry crane spanning the yard — visual anchor plus overhead cover.
   for (const gx of [-13, 13]) {
@@ -426,12 +466,20 @@ export function buildMap() {
     solid(bx + side * 2, 0, 4.5, bx + side * 4, 1.6, 6.5, 'crateGreen');
     deco(bx - side * 2.2, 4.0, -6.5, bx + side * 4.5, 4.3, 6.5, 'metal', { tint: 0.95 });
     for (const cz of [-6, 6]) deco(bx - side * 2.0, 0, cz - 0.15, bx - side * 1.8, 4.0, cz + 0.15, 'darkmetal');
-    // Stairs up to the perimeter catwalk that overlooks the lane.
-    solid(bx + side * 1.5, 0, -12.6, bx + side * 4.5, 3.2, -9.4, 'concrete',
-      { ramp: { axis: 'x', dir: side > 0 ? -1 : 1 } });
+    // Stairs up to the perimeter catwalk that overlooks the lane. The landing
+    // sits at exactly catwalk height and overlaps it, so the two surfaces join
+    // cleanly instead of leaving a low slab over the top step.
     solid(bx - side * 2.5, 3.2, -13.4, bx + side * 5.2, 3.5, -9.4, 'grate');
+    const sx0 = bx + side * 2.5, sx1 = bx + side * 5.8;
+    solid(Math.min(sx0, sx1), 3.2, -13.4, Math.max(sx0, sx1), 3.5, -9.4, 'grate');
+    solid(Math.min(sx0, sx1), 0, -9.4, Math.max(sx0, sx1), 3.5, -3.4, 'grate',
+      { ramp: { axis: 'z', dir: -1 } });
     for (let z = -13.2; z < -9.6; z += 1.6) {
       deco(bx - side * 2.5, 3.5, z, bx - side * 2.35, 4.6, z + 0.14, 'darkmetal');
+    }
+    for (let z = -9.2; z < -3.6; z += 1.5) {
+      const y = 3.5 * (1 - (z + 9.4) / 6);
+      deco(bx - side * 2.5, y, z - 0.06, bx - side * 2.36, y + 1.0, z + 0.06, 'darkmetal');
     }
     cover(bx - side * 1.5, -11.4, side, 0);
 
