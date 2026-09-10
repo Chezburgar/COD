@@ -3,7 +3,7 @@
 A 5v5 online team-deathmatch FPS that runs entirely in the browser. No installs, no
 game server, no downloaded audio — the whole thing is a static site.
 
-**▶ Play: https://chezburgar.github.io/cod/**
+**▶ Play: https://chezburgar.github.io/COD/**
 
 ---
 

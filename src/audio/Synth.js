@@ -195,14 +195,14 @@ export function renderGunshot(ctx, p) {
   const cutTop = (9000 * bright) * (1 - 0.72 * distance);
   lowpass(blast, cutTop, (t) => Math.max(0.05, Math.exp(-t * (3.4 - 1.6 * distance))));
   highpass(blast, 140 + 60 * distance);
-  const blastGain = crack * (1 - supp * 0.93) * (0.5 + 0.5 * nearness);
+  const blastGain = crack * (1 - supp * 0.93) * (0.22 + 0.78 * nearness);
   for (let i = 0; i < blastLen; i++) mono[i] += blast[i] * blastGain;
 
   /* 2 ─ pressure thump: the chest-hit sine that sells calibre. */
   sweep(mono, Math.min(n, (0.24 * SR) | 0),
-    (150 + 60 * punch) * (1 - 0.25 * distance), 42,
-    punch * 0.9 * (1 - supp * 0.7) * (0.35 + 0.65 * nearness),
-    0.0008 * SR, (0.028 + 0.02 * distance) * SR, 2.0, 0.7);
+    (150 + 60 * punch) * (1 - 0.32 * distance), 40,
+    punch * 0.9 * (1 - supp * 0.7) * (0.82 + 0.18 * nearness),
+    0.0008 * SR, (0.034 + 0.05 * distance) * SR, 1.8, 0.7);
 
   /* 3 ─ body: two resonators over a short noise burst, tuned per weapon.
          This is what makes an MP5 read differently from a .50 rifle. */
@@ -397,10 +397,16 @@ export function renderFlashbang(ctx) {
   const bl = (0.35 * SR) | 0;
   const blast = new Float32Array(bl);
   noise(blast, 0, bl);
-  for (let i = 0; i < bl; i++) blast[i] *= env(i, bl, 0.0004 * SR, 0.045 * SR, 2.2);
-  lowpass(blast, 11000, (t) => Math.max(0.06, Math.exp(-t * 4.2)));
-  for (let i = 0; i < bl; i++) mono[i] += blast[i];
-  sweep(mono, (0.5 * SR) | 0, 260, 60, 0.7, 0.001 * SR, 0.05 * SR, 2.1, 0.7);
+  for (let i = 0; i < bl; i++) blast[i] *= env(i, bl, 0.0003 * SR, 0.05 * SR, 2.0);
+  lowpass(blast, 15000, (t) => Math.max(0.14, Math.exp(-t * 2.6)));
+  highpass(blast, 260);
+  for (let i = 0; i < bl; i++) mono[i] += blast[i] * 1.6;
+  // A ringing metallic component is what makes the ears sing afterwards.
+  const ring = new Float32Array(n);
+  resonate(blast, ring, 3200, 9, 0.5);
+  resonate(blast, ring, 5400, 12, 0.32);
+  for (let i = 0; i < bl; i++) mono[i] += ring[i];
+  sweep(mono, (0.45 * SR) | 0, 240, 70, 0.42, 0.001 * SR, 0.04 * SR, 2.4, 0.7);
   normalize(mono, 0.97);
   fadeOut(mono, 40);
   const buf = makeBuffer(ctx, len, 2);
