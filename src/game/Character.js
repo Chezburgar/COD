@@ -70,6 +70,9 @@ function stripRootMotion(clip) {
 
 let assets = null;
 
+/** The loaded rig and derived clips, once `loadCharacterAsset` has resolved. */
+export function getCharacterAssets() { return assets; }
+
 export async function loadCharacterAsset(onProgress) {
   if (assets) return assets;
   const loader = new GLTFLoader();

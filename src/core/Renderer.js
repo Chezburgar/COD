@@ -155,7 +155,10 @@ const GradeShader = {
 };
 
 /** Shared by the sky shader and the directional light so they can't drift apart. */
-const SUN_DIR = new THREE.Vector3(0.36, 0.78, -0.51).normalize();
+/* Mid-afternoon rather than noon: a lower sun rakes across every surface,
+   throws long shadows that separate the lanes, and gives the level far more
+   modelling than an overhead light ever does. */
+const SUN_DIR = new THREE.Vector3(0.44, 0.47, -0.56).normalize();
 
 export const QUALITY = {
   low:    { shadow: 1024, bloom: false, smaa: false, scale: 0.72, scopeRT: 512,  aniso: 2, shadowType: THREE.BasicShadowMap },
@@ -230,12 +233,12 @@ export class Renderer {
       new THREE.ShaderMaterial({
         side: THREE.BackSide, depthWrite: false, fog: false,
         uniforms: {
-          uTop:    { value: new THREE.Color(0x2d5f9e) },
-          uMid:    { value: new THREE.Color(0x9fc0dd) },
-          uHorizon:{ value: new THREE.Color(0xe4d3b4) },
-          uGround: { value: new THREE.Color(0x7d7568) },
+          uTop:    { value: new THREE.Color(0x2a5896) },
+          uMid:    { value: new THREE.Color(0x9dbedb) },
+          uHorizon:{ value: new THREE.Color(0xecd9b6) },
+          uGround: { value: new THREE.Color(0x7b7161) },
           uSunDir: { value: SUN_DIR.clone() },
-          uSunCol: { value: new THREE.Color(0xfff0d0) },
+          uSunCol: { value: new THREE.Color(0xffe9c0) },
         },
         vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
         fragmentShader: `
@@ -260,7 +263,7 @@ export class Renderer {
     sky.renderOrder = -1000;
     this.scene.add(sky);
     this.sky = sky;
-    this.scene.fog = new THREE.FogExp2(0xc9cbb8, 0.0052);
+    this.scene.fog = new THREE.FogExp2(0xcdcab4, 0.0058);
 
     // Pre-filter the sky into an environment map. Without this every metallic
     // surface has nothing to reflect and renders black, and shadowed sides of
@@ -278,7 +281,7 @@ export class Renderer {
 
   _buildLights() {
     const sunDir = SUN_DIR.clone();
-    const sun = new THREE.DirectionalLight(0xfff4de, 3.3);
+    const sun = new THREE.DirectionalLight(0xffeeca, 3.5);
     sun.position.copy(sunDir).multiplyScalar(90);
     sun.castShadow = true;
     const q = QUALITY[this.quality];
@@ -300,13 +303,15 @@ export class Renderer {
     this.scene.add(new THREE.AmbientLight(0x6e7a8a, 0.55));
 
     // The view model gets its own rig so it reads well against any backdrop.
-    const vmKey = new THREE.DirectionalLight(0xfff3dd, 2.7);
+    // Kept close to the sun's own strength: brighter than that and the weapon
+    // floats in front of the world as a pale cut-out instead of sitting in it.
+    const vmKey = new THREE.DirectionalLight(0xfff3dd, 1.85);
     vmKey.position.set(-0.7, 1.1, 0.8);
-    const vmFill = new THREE.DirectionalLight(0x9dc0e4, 1.25);
+    const vmFill = new THREE.DirectionalLight(0x9dc0e4, 0.7);
     vmFill.position.set(1.0, -0.1, -0.5);
-    const vmRim = new THREE.DirectionalLight(0xffd9a8, 1.1);
+    const vmRim = new THREE.DirectionalLight(0xffd9a8, 0.66);
     vmRim.position.set(0.2, 0.4, -1.0);
-    this.vmScene.add(vmKey, vmFill, vmRim, new THREE.AmbientLight(0x8b93a0, 0.9));
+    this.vmScene.add(vmKey, vmFill, vmRim, new THREE.AmbientLight(0x8b93a0, 0.55));
   }
 
   _buildComposer() {

@@ -33,6 +33,22 @@ function blotches(ctx, size, n, rng, color, rMin, rMax, alpha) {
   }
 }
 
+/** Vertical weathering — rust bleeding out of a seam, rain washing a wall. */
+function streaks(ctx, size, n, rng, color, alpha) {
+  for (let i = 0; i < n; i++) {
+    const x = rng() * size;
+    const y = rng() * size * 0.5;
+    const w = size * (0.004 + rng() * 0.02);
+    const len = size * (0.1 + rng() * 0.45);
+    const g = ctx.createLinearGradient(x, y, x, y + len);
+    g.addColorStop(0, `rgba(${color},${alpha})`);
+    g.addColorStop(0.25, `rgba(${color},${alpha * 0.6})`);
+    g.addColorStop(1, `rgba(${color},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y, w, len);
+  }
+}
+
 function finish(c, repeat = 1, aniso = 8) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -43,80 +59,168 @@ function finish(c, repeat = 1, aniso = 8) {
 }
 
 const cache = new Map();
+const normalCache = new Map();
+const roughCache = new Map();
+
+/**
+ * Turns an albedo canvas into a tangent-space normal map by treating its
+ * luminance as a height field. Everything in this level is procedural, so the
+ * paint already describes the surface relief — reading the gradient back out
+ * gives grout lines, corrugation and grain that catch the sun, for the cost of
+ * one extra texture per material.
+ */
+function heightNormal(src, strength) {
+  const size = src.width;
+  const data = src.getContext('2d').getImageData(0, 0, size, size).data;
+  const [out, ctx] = canvas(size);
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  const mask = size - 1;                                   // sizes are powers of two
+  const lum = (x, y) => {
+    const i = (((y & mask) * size) + (x & mask)) * 4;
+    return (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+  };
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (lum(x + 1, y) - lum(x - 1, y)) * strength;
+      const dy = (lum(x, y + 1) - lum(x, y - 1)) * strength;
+      const nx = -dx, ny = dy, nz = 1;                     // canvas y runs opposite to v
+      const l = Math.hypot(nx, ny, nz);
+      const i = ((y * size) + x) * 4;
+      d[i] = (nx / l * 0.5 + 0.5) * 255;
+      d[i + 1] = (ny / l * 0.5 + 0.5) * 255;
+      d[i + 2] = (nz / l * 0.5 + 0.5) * 255;
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/** Dark patches read as damp or oily, so they come out glossier than the dust. */
+function roughFromAlbedo(src, low) {
+  const size = src.width;
+  const data = src.getContext('2d').getImageData(0, 0, size, size).data;
+  const [out, ctx] = canvas(size);
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+    const v = (low + (1 - low) * l) * 255;
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/** Relief depth and gloss spread per surface. */
+const SURFACE_RELIEF = {
+  concrete: [2.6, 0.74], asphalt: [3.4, 0.66], sand: [2.2, 0.84], metal: [4.4, 0.5],
+  container: [4.8, 0.52], wood: [3.0, 0.7], sandbag: [4.2, 0.8], grid: [5.5, 0.58],
+  plaster: [2.4, 0.78],
+};
+
+export function texNormal(kind, aniso = 8) {
+  if (normalCache.has(kind)) return normalCache.get(kind);
+  tex(kind, aniso);                                        // ensures the source canvas exists
+  const src = sources.get(kind);
+  const t = finish(heightNormal(src, SURFACE_RELIEF[kind]?.[0] ?? 2.8), 1, aniso);
+  t.colorSpace = THREE.NoColorSpace;
+  normalCache.set(kind, t);
+  return t;
+}
+
+export function texRough(kind, aniso = 8) {
+  if (roughCache.has(kind)) return roughCache.get(kind);
+  tex(kind, aniso);
+  const src = sources.get(kind);
+  const t = finish(roughFromAlbedo(src, SURFACE_RELIEF[kind]?.[1] ?? 0.7), 1, aniso);
+  t.colorSpace = THREE.NoColorSpace;
+  roughCache.set(kind, t);
+  return t;
+}
+
+const sources = new Map();
 
 export function tex(kind, aniso = 8) {
   if (cache.has(kind)) return cache.get(kind);
-  const size = 256;
+  const size = 512;
+  const k = size / 256;                     // feature sizes were authored at 256
   const [c, ctx] = canvas(size);
   const rng = mulberry32(kind.length * 9176 + kind.charCodeAt(0) * 31);
 
   switch (kind) {
     case 'concrete': {
       ctx.fillStyle = '#a9a49c'; ctx.fillRect(0, 0, size, size);
-      blotches(ctx, size, 26, rng, '120,116,108', 12, 46, 0.28);
-      blotches(ctx, size, 14, rng, '190,186,178', 10, 40, 0.2);
+      blotches(ctx, size, 26, rng, '120,116,108', 12 * k, 46 * k, 0.28);
+      blotches(ctx, size, 14, rng, '190,186,178', 10 * k, 40 * k, 0.2);
       // Panel seams.
-      ctx.strokeStyle = 'rgba(70,68,64,.35)'; ctx.lineWidth = 2;
-      for (const p of [0, 128]) { ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke(); }
+      ctx.strokeStyle = 'rgba(70,68,64,.35)'; ctx.lineWidth = 2 * k;
+      for (const p of [0, size / 2]) { ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke(); }
+      streaks(ctx, size, 14, rng, '78,76,70', 0.24);
       grain(ctx, size, 26, rng);
       break;
     }
     case 'asphalt': {
       ctx.fillStyle = '#4c4e52'; ctx.fillRect(0, 0, size, size);
-      blotches(ctx, size, 40, rng, '30,32,34', 6, 26, 0.4);
-      blotches(ctx, size, 20, rng, '110,112,116', 4, 14, 0.25);
+      blotches(ctx, size, 40, rng, '30,32,34', 6 * k, 26 * k, 0.4);
+      blotches(ctx, size, 20, rng, '110,112,116', 4 * k, 14 * k, 0.25);
       grain(ctx, size, 34, rng);
       break;
     }
     case 'sand': {
       ctx.fillStyle = '#c3ab80'; ctx.fillRect(0, 0, size, size);
-      blotches(ctx, size, 30, rng, '160,138,100', 14, 52, 0.3);
-      blotches(ctx, size, 18, rng, '214,198,166', 10, 40, 0.28);
+      blotches(ctx, size, 30, rng, '160,138,100', 14 * k, 52 * k, 0.3);
+      blotches(ctx, size, 18, rng, '214,198,166', 10 * k, 40 * k, 0.28);
       grain(ctx, size, 22, rng);
       break;
     }
     case 'metal': {
       ctx.fillStyle = '#767d85'; ctx.fillRect(0, 0, size, size);
       // Corrugation.
-      for (let x = 0; x < size; x += 16) {
-        const g = ctx.createLinearGradient(x, 0, x + 16, 0);
+      for (let x = 0; x < size; x += 16 * k) {
+        const g = ctx.createLinearGradient(x, 0, x + 16 * k, 0);
         g.addColorStop(0, 'rgba(255,255,255,.10)');
         g.addColorStop(0.5, 'rgba(0,0,0,.14)');
         g.addColorStop(1, 'rgba(255,255,255,.06)');
-        ctx.fillStyle = g; ctx.fillRect(x, 0, 16, size);
+        ctx.fillStyle = g; ctx.fillRect(x, 0, 16 * k, size);
       }
-      blotches(ctx, size, 16, rng, '128,74,38', 5, 22, 0.32);
+      blotches(ctx, size, 16, rng, '128,74,38', 5 * k, 22 * k, 0.32);
+      streaks(ctx, size, 18, rng, '104,58,26', 0.42);
       grain(ctx, size, 16, rng);
       break;
     }
     case 'container': {
       ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
-      for (let x = 0; x < size; x += 22) {
-        const g = ctx.createLinearGradient(x, 0, x + 22, 0);
+      for (let x = 0; x < size; x += 22 * k) {
+        const g = ctx.createLinearGradient(x, 0, x + 22 * k, 0);
         g.addColorStop(0, 'rgba(0,0,0,.18)');
         g.addColorStop(0.35, 'rgba(255,255,255,.16)');
         g.addColorStop(1, 'rgba(0,0,0,.22)');
-        ctx.fillStyle = g; ctx.fillRect(x, 0, 22, size);
+        ctx.fillStyle = g; ctx.fillRect(x, 0, 22 * k, size);
       }
       ctx.fillStyle = 'rgba(0,0,0,.22)';
-      ctx.fillRect(0, 0, size, 12); ctx.fillRect(0, size - 12, size, 12);
-      blotches(ctx, size, 22, rng, '92,52,26', 4, 18, 0.4);
+      ctx.fillRect(0, 0, size, 12 * k); ctx.fillRect(0, size - 12 * k, size, 12 * k);
+      blotches(ctx, size, 22, rng, '92,52,26', 4 * k, 18 * k, 0.4);
+      streaks(ctx, size, 26, rng, '96,52,22', 0.5);
+      streaks(ctx, size, 10, rng, '30,26,22', 0.3);
       grain(ctx, size, 18, rng);
       break;
     }
     case 'wood': {
       ctx.fillStyle = '#a87f4d'; ctx.fillRect(0, 0, size, size);
-      for (let y = 0; y < size; y += 32) {
+      for (let y = 0; y < size; y += 32 * k) {
         ctx.fillStyle = `rgba(${110 + rng() * 40 | 0},${80 + rng() * 30 | 0},${44 + rng() * 20 | 0},.45)`;
-        ctx.fillRect(0, y, size, 30);
-        ctx.strokeStyle = 'rgba(50,34,18,.55)'; ctx.lineWidth = 2;
+        ctx.fillRect(0, y, size, 30 * k);
+        ctx.strokeStyle = 'rgba(50,34,18,.55)'; ctx.lineWidth = 2 * k;
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size, y); ctx.stroke();
         for (let i = 0; i < 5; i++) {
-          ctx.strokeStyle = 'rgba(72,50,26,.22)'; ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(72,50,26,.22)'; ctx.lineWidth = 1 * k;
           ctx.beginPath();
-          const yy = y + 4 + rng() * 22;
+          const yy = y + (4 + rng() * 22) * k;
           ctx.moveTo(0, yy);
-          ctx.bezierCurveTo(size * 0.3, yy + (rng() - 0.5) * 6, size * 0.6, yy + (rng() - 0.5) * 6, size, yy);
+          ctx.bezierCurveTo(size * 0.3, yy + (rng() - 0.5) * 6 * k, size * 0.6, yy + (rng() - 0.5) * 6 * k, size, yy);
           ctx.stroke();
         }
       }
@@ -125,13 +229,13 @@ export function tex(kind, aniso = 8) {
     }
     case 'sandbag': {
       ctx.fillStyle = '#8e8263'; ctx.fillRect(0, 0, size, size);
-      for (let y = 0; y < size; y += 26) {
-        for (let x = (y / 26) % 2 ? -20 : 0; x < size; x += 42) {
-          const g = ctx.createRadialGradient(x + 21, y + 13, 2, x + 21, y + 13, 24);
+      for (let y = 0; y < size; y += 26 * k) {
+        for (let x = (y / (26 * k)) % 2 ? -20 * k : 0; x < size; x += 42 * k) {
+          const g = ctx.createRadialGradient(x + 21 * k, y + 13 * k, 2 * k, x + 21 * k, y + 13 * k, 24 * k);
           g.addColorStop(0, 'rgba(180,168,132,.85)');
           g.addColorStop(1, 'rgba(92,84,62,.9)');
           ctx.fillStyle = g;
-          ctx.beginPath(); ctx.ellipse(x + 21, y + 13, 21, 12, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(x + 21 * k, y + 13 * k, 21 * k, 12 * k, 0, 0, Math.PI * 2); ctx.fill();
         }
       }
       grain(ctx, size, 22, rng);
@@ -139,22 +243,23 @@ export function tex(kind, aniso = 8) {
     }
     case 'grid': { // catwalk grating
       ctx.fillStyle = '#5b636b'; ctx.fillRect(0, 0, size, size);
-      ctx.strokeStyle = 'rgba(24,28,32,.85)'; ctx.lineWidth = 6;
-      for (let i = 0; i < size; i += 32) {
+      ctx.strokeStyle = 'rgba(24,28,32,.85)'; ctx.lineWidth = 6 * k;
+      for (let i = 0; i < size; i += 32 * k) {
         ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, size); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
       }
-      ctx.strokeStyle = 'rgba(150,158,166,.35)'; ctx.lineWidth = 2;
-      for (let i = 0; i < size; i += 32) {
-        ctx.beginPath(); ctx.moveTo(i + 3, 0); ctx.lineTo(i + 3, size); ctx.stroke();
+      ctx.strokeStyle = 'rgba(150,158,166,.35)'; ctx.lineWidth = 2 * k;
+      for (let i = 0; i < size; i += 32 * k) {
+        ctx.beginPath(); ctx.moveTo(i + 3 * k, 0); ctx.lineTo(i + 3 * k, size); ctx.stroke();
       }
       grain(ctx, size, 14, rng);
       break;
     }
     case 'plaster': {
       ctx.fillStyle = '#c4b79f'; ctx.fillRect(0, 0, size, size);
-      blotches(ctx, size, 30, rng, '150,138,116', 12, 48, 0.25);
-      blotches(ctx, size, 10, rng, '96,88,74', 6, 22, 0.3);
+      blotches(ctx, size, 30, rng, '150,138,116', 12 * k, 48 * k, 0.25);
+      blotches(ctx, size, 10, rng, '96,88,74', 6 * k, 22 * k, 0.3);
+      streaks(ctx, size, 16, rng, '104,94,76', 0.3);
       grain(ctx, size, 18, rng);
       break;
     }
@@ -165,6 +270,7 @@ export function tex(kind, aniso = 8) {
   }
   const t = finish(c, 1, aniso);
   cache.set(kind, t);
+  sources.set(kind, c);
   return t;
 }
 
@@ -239,6 +345,63 @@ export function bulletHoleSprite(size = 64) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
+}
+
+/**
+ * Blood thrown across the camera itself, for when the player is the one being
+ * hit. Drawn as a data URL rather than a GL texture because it belongs on the
+ * HUD, over everything: a dense core of spatter, a scatter of droplets thrown
+ * away from it, and a few runs pulled downward by gravity.
+ */
+export function bloodScreenSplat(seed = 1, size = 512) {
+  const [c, ctx] = canvas(size);
+  const rng = mulberry32(seed * 7919 + 13);
+  const cx = size * (0.3 + rng() * 0.4);
+  const cy = size * (0.3 + rng() * 0.4);
+
+  const blob = (x, y, r, alpha) => {
+    // Irregular edges: a circle drawn from a wobbling radius reads as spatter,
+    // a perfect one reads as a bullet hole.
+    const pts = 14;
+    ctx.beginPath();
+    for (let i = 0; i <= pts; i++) {
+      const a = (i / pts) * Math.PI * 2;
+      const rr = r * (0.62 + rng() * 0.6);
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.15);
+    g.addColorStop(0, `rgba(112,6,8,${alpha})`);
+    g.addColorStop(0.55, `rgba(78,4,6,${alpha * 0.92})`);
+    g.addColorStop(1, `rgba(46,2,4,${alpha * 0.5})`);
+    ctx.fillStyle = g;
+    ctx.fill();
+  };
+
+  for (let i = 0; i < 5; i++) {
+    blob(cx + (rng() - 0.5) * size * 0.3, cy + (rng() - 0.5) * size * 0.3,
+      size * (0.07 + rng() * 0.12), 0.72 + rng() * 0.24);
+  }
+  for (let i = 0; i < 90; i++) {
+    const a = rng() * Math.PI * 2;
+    const d = size * (0.08 + Math.pow(rng(), 0.6) * 0.5);
+    blob(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.9,
+      size * (0.004 + Math.pow(rng(), 2) * 0.03), 0.4 + rng() * 0.5);
+  }
+  for (let i = 0; i < 5; i++) {                       // runs
+    const x = cx + (rng() - 0.5) * size * 0.4;
+    const y = cy + (rng() - 0.5) * size * 0.2;
+    const len = size * (0.06 + rng() * 0.22);
+    const w = size * (0.006 + rng() * 0.012);
+    const g = ctx.createLinearGradient(x, y, x, y + len);
+    g.addColorStop(0, 'rgba(86,4,6,0.72)');
+    g.addColorStop(1, 'rgba(60,3,4,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - w / 2, y, w, len);
+    blob(x, y + len, w * 0.9, 0.6);
+  }
+  return c.toDataURL('image/png');
 }
 
 export function bloodSprite(size = 64) {

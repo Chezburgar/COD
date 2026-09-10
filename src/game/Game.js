@@ -14,6 +14,7 @@ import { ProjectileSystem, blastDamage, flashIntensity } from './Projectiles.js'
 import { Combatant, BTN, MOVE, damageAt } from './Combatant.js';
 import { Bot, botName, resetBotNames, DIFFICULTY } from './Bot.js';
 import { Character, loadCharacterAsset, TEAM_COLORS } from './Character.js';
+import { loadWeaponPack } from './WeaponAssets.js';
 import { WEAPONS, THROWABLES, KILLSTREAKS, DEFAULT_LOADOUT, fireInterval } from './Weapons.js';
 import { SURFACE } from '../world/Collision.js';
 import { clamp, clamp01, damp, lerp, rand, randInt, pick, fmtTime } from '../core/MathUtils.js';
@@ -72,7 +73,12 @@ export class Game {
     this._spawnScratch = new THREE.Vector3();
   }
 
-  static async preload(onProgress) { await loadCharacterAsset(onProgress); }
+  /** Everything that has to be on disk before a match can start. */
+  static async preload(onProgress) {
+    await loadCharacterAsset((p) => onProgress?.(p * 0.68, 'Loading operator'));
+    await loadWeaponPack((p) => onProgress?.(0.68 + p * 0.32, 'Loading armoury'));
+    onProgress?.(1, 'Loading armoury');
+  }
 
   emit(name, ...args) { this.on[name]?.(...args); }
 

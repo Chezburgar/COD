@@ -1,6 +1,7 @@
 /* HUD — every readout the player sees while alive. */
 import { clamp, clamp01, lerp, fmtTime } from '../core/MathUtils.js';
 import { WEAPONS, THROWABLES, KILLSTREAKS } from '../game/Weapons.js';
+import { bloodScreenSplat } from '../world/Textures.js';
 import { TEAM_NAMES } from '../game/Game.js';
 
 const $ = (s) => document.querySelector(s);
@@ -41,8 +42,11 @@ export class HUD {
       respawnCount: $('#respawn-count'),
       toasts: $('#toasts'),
       scopeFrame: $('#scope-frame'),
+      bloodLayer: $('#blood-layer'),
     };
     this.hitmarkTimer = 0;
+    this.blood = [];
+    this.bloodArt = null;
     this.damageT = 0;
     this.flashT = 0;
     this.flashDur = 1;
@@ -155,6 +159,16 @@ export class HUD {
     this.el.vignette.style.opacity = String(clamp01(hp < 1 ? dmgAmt : 0));
     this.hurtPulse = Math.max(0, this.hurtPulse - dt * 2.4);
 
+    /* blood on the camera, drying off */
+    for (const b of this.blood) {
+      if (b.life <= 0) continue;
+      b.life -= dt;
+      if (b.life <= 0) { b.el.style.opacity = '0'; continue; }
+      const k = b.life / b.dur;
+      b.el.style.opacity = String(b.peak * Math.pow(k, 0.7));
+      b.el.style.transform = `translate(-50%,-50%) rotate(${b.rot}deg) scale(${b.scale * (1 + (1 - k) * 0.06)})`;
+    }
+
     /* flashbang */
     if (this.flashT > 0) {
       this.flashT -= dt;
@@ -205,9 +219,62 @@ export class HUD {
     void headshot;
   }
 
+  /* ── blood on the camera ───────────────────────────────────────────────
+     Getting hit throws blood across the view rather than only tinting it: it
+     is the clearest possible read that the damage is yours, and it clears
+     itself as the moment passes. */
+
+  _bloodArt() {
+    // Four hand-drawn-looking splats is enough variety that repeats are not
+    // noticeable, and they are generated once, on the first hit taken.
+    this.bloodArt ??= [1, 2, 3, 4].map((seed) => bloodScreenSplat(seed));
+    return this.bloodArt;
+  }
+
+  bloodSplat(strength = 1, rel = null) {
+    const art = this._bloodArt();
+    let slot = this.blood.find((b) => b.life <= 0);
+    if (!slot && this.blood.length < 7) {
+      const el = document.createElement('div');
+      el.className = 'blood-splat';
+      this.el.bloodLayer.appendChild(el);
+      slot = { el, life: 0, dur: 1, peak: 0, rot: 0, scale: 1 };
+      this.blood.push(slot);
+    }
+    if (!slot) slot = this.blood.reduce((a, b) => (a.life < b.life ? a : b));
+
+    // Blood lands on the side the shot came from, so the splatter itself says
+    // where the shooter is.
+    const bias = rel === null ? (Math.random() - 0.5) * 2 : clamp(-Math.sin(rel) * 1.3, -1, 1);
+    const size = (34 + Math.random() * 30) * (0.8 + strength * 0.45);
+    slot.el.style.backgroundImage = `url(${art[(Math.random() * art.length) | 0]})`;
+    slot.el.style.width = `${size}vmin`;
+    slot.el.style.height = `${size}vmin`;
+    // Kept off the middle of the screen: blood that covers the crosshair is a
+    // punishment, not a signal.
+    slot.el.style.left = `${50 + bias * 30 + (Math.random() - 0.5) * 26}%`;
+    slot.el.style.top = `${42 + (Math.random() - 0.5) * 58}%`;
+    slot.rot = Math.random() * 360;
+    slot.scale = 1;
+    slot.peak = clamp(0.34 + strength * 0.3, 0.26, 0.72);
+    slot.dur = 2.4 + strength * 1.6;
+    slot.life = slot.dur;
+    slot.el.style.transform = `translate(-50%,-50%) rotate(${slot.rot}deg)`;
+    slot.el.style.opacity = String(slot.peak);
+  }
+
+  clearBlood() {
+    for (const b of this.blood) { b.life = 0; b.el.style.opacity = '0'; }
+  }
+
   damaged(amount, fromPos, myPos, myYaw) {
     this.damageT = 0.5;
     this.hurtPulse = 1;
+    const rel0 = fromPos && myPos
+      ? Math.atan2(-(fromPos.x - myPos.x), -(fromPos.z - myPos.z)) - myYaw : null;
+    const heavy = clamp01(amount / 45);
+    this.bloodSplat(0.45 + heavy, rel0);
+    if (amount > 40) this.bloodSplat(0.5 + heavy, rel0);
     if (!fromPos) return;
     const dx = fromPos.x - myPos.x, dz = fromPos.z - myPos.z;
     const worldAngle = Math.atan2(-dx, -dz);
@@ -243,6 +310,8 @@ export class HUD {
   }
 
   died(killerName, weaponName) {
+    this.bloodSplat(1.6);
+    this.bloodSplat(1.4);
     this.el.deathBy.textContent = killerName ? `${killerName} — ${weaponName}` : 'You died';
     this.el.deathScreen.classList.remove('hidden');
   }
@@ -250,6 +319,7 @@ export class HUD {
   respawned() {
     this.el.deathScreen.classList.add('hidden');
     this.el.hitDirs.innerHTML = '';
+    this.clearBlood();
   }
 
   streakBanner(title, sub) {

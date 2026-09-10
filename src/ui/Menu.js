@@ -21,7 +21,7 @@ export const SETTINGS_SCHEMA = [
   { key: 'renderScale', label: 'Resolution scale', type: 'range', min: 0.5, max: 1, step: 0.05, def: 1, fmt: (v) => `${Math.round(v * 100)}%` },
   { key: 'masterVolume', label: 'Master volume', type: 'range', min: 0, max: 1, step: 0.02, def: 0.85, fmt: pct },
   { key: 'sfxVolume', label: 'Effects volume', type: 'range', min: 0, max: 1, step: 0.02, def: 1, fmt: pct },
-  { key: 'musicVolume', label: 'Music volume', type: 'range', min: 0, max: 1, step: 0.02, def: 0.45, fmt: pct },
+  { key: 'musicVolume', label: 'Music volume', type: 'range', min: 0, max: 1, step: 0.02, def: 0.3, fmt: pct },
   { key: 'grain', label: 'Film grain', type: 'range', min: 0, max: 0.09, step: 0.005, def: 0.035, fmt: (v) => v === 0 ? 'Off' : v.toFixed(3) },
   { key: 'vignette', label: 'Vignette', type: 'range', min: 0, max: 0.8, step: 0.02, def: 0.42, fmt: (v) => v === 0 ? 'Off' : v.toFixed(2) },
   { key: 'crosshairColor', label: 'Crosshair colour', type: 'select', options: ['#eafff2', '#00ff9d', '#ff3b30', '#ffd23c', '#4fc3f7', '#ffffff'], def: '#eafff2', labels: ['Mint', 'Green', 'Red', 'Amber', 'Cyan', 'White'] },

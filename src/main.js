@@ -81,7 +81,7 @@ async function boot() {
     step = gen.next();
   }
   setProgress(0.62, 'Loading operator');
-  await Game.preload((p) => setProgress(0.62 + p * 0.3, 'Loading operator'));
+  await Game.preload((p, label) => setProgress(0.62 + p * 0.3, label));
 
   setProgress(0.94, 'Building Crossfire Yard');
   await frame();
@@ -590,7 +590,7 @@ window.__dbg = {
   get game() { return game; },
   get player() { return player; },
   get fps() { return fps; },
-  renderer, audio, input, viewModel, net,
+  renderer, audio, input, viewModel, net, hud,
   get phase() { return phase; },
   startSolo,
 };

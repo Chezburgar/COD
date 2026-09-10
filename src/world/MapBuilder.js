@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CollisionWorld } from './Collision.js';
-import { tex } from './Textures.js';
+import { tex, texNormal, texRough } from './Textures.js';
 import { mulberry32, lerp, clamp01 } from '../core/MathUtils.js';
 
 export const MAP_NAME = 'Crossfire Yard';
@@ -32,11 +32,11 @@ const MATS = {
   grate:     { t: 'grid',      c: 0x8d959d, s: 0.5,  r: 0.62, m: 0.45 },
   wood:      { t: 'wood',      c: 0xbb8f5c, s: 0.35, r: 0.88, m: 0.0 },
   sandbag:   { t: 'sandbag',   c: 0xa2946f, s: 0.3,  r: 0.98, m: 0.0 },
-  crateRed:  { t: 'container', c: 0xb84a36, s: 0.16, r: 0.68, m: 0.16 },
-  crateBlue: { t: 'container', c: 0x2f6d8c, s: 0.16, r: 0.68, m: 0.16 },
-  crateGreen:{ t: 'container', c: 0x4f7f45, s: 0.16, r: 0.68, m: 0.16 },
-  crateYell: { t: 'container', c: 0xc39428, s: 0.16, r: 0.68, m: 0.16 },
-  crateGrey: { t: 'container', c: 0x76797c, s: 0.16, r: 0.68, m: 0.16 },
+  crateRed:  { t: 'container', c: 0x8f4032, s: 0.16, r: 0.68, m: 0.16 },
+  crateBlue: { t: 'container', c: 0x2c5a72, s: 0.16, r: 0.68, m: 0.16 },
+  crateGreen:{ t: 'container', c: 0x46663e, s: 0.16, r: 0.68, m: 0.16 },
+  crateYell: { t: 'container', c: 0x9c7830, s: 0.16, r: 0.68, m: 0.16 },
+  crateGrey: { t: 'container', c: 0x6b6e71, s: 0.16, r: 0.68, m: 0.16 },
   roof:      { t: 'metal',     c: 0x646a71, s: 0.2,  r: 0.74, m: 0.3 },
   darkmetal: { t: 'metal',     c: 0x555c63, s: 0.3,  r: 0.62, m: 0.5 },
 };
@@ -141,8 +141,13 @@ class MeshBatch {
       g.setIndex(b.idx);
       g.computeBoundingSphere();
       const M = MATS[matKey] ?? MATS.concrete;
+      // Every surface carries relief and gloss variation derived from its own
+      // paint, so the sun rakes across corrugation and grout instead of
+      // hitting a flat panel.
       const mat = new THREE.MeshStandardMaterial({
-        map: tex(M.t), vertexColors: true, roughness: M.r, metalness: M.m,
+        map: tex(M.t), normalMap: texNormal(M.t), roughnessMap: texRough(M.t),
+        vertexColors: true, roughness: M.r, metalness: M.m,
+        normalScale: new THREE.Vector2(M.n ?? 1, M.n ?? 1),
         envMapIntensity: 0.9,
       });
       const mesh = new THREE.Mesh(g, mat);
@@ -182,7 +187,7 @@ export function buildMap() {
     collision.add(
       [min.x, min.y, min.z], [max.x, max.y, max.z], PHYS[matKey] ?? 'concrete',
       { ramp: opts.ramp ?? null, solid: opts.solid !== false, noShoot: opts.noShoot });
-    batch.box(min, max, matKey, { ...opts, tint: opts.tint ?? (0.94 + rng() * 0.12) });
+    batch.box(min, max, matKey, { ...opts, tint: opts.tint ?? (0.86 + rng() * 0.2) });
   };
 
   /** Geometry only — no collision. For trim, railings and detail. */
@@ -190,7 +195,7 @@ export function buildMap() {
     batch.box(
       new THREE.Vector3(Math.min(x0, x1), Math.min(y0, y1), Math.min(z0, z1)),
       new THREE.Vector3(Math.max(x0, x1), Math.max(y0, y1), Math.max(z0, z1)),
-      matKey, { ...opts, tint: opts.tint ?? (0.94 + rng() * 0.12) });
+      matKey, { ...opts, tint: opts.tint ?? (0.86 + rng() * 0.2) });
   };
 
   const cover = (x, z, dirX, dirZ) => coverPoints.push({ x, z, dx: dirX, dz: dirZ });

@@ -1,16 +1,18 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   WeaponModels — procedural weapon geometry.
+   WeaponModels — weapon geometry.
 
-   Every gun is assembled from primitives, so there are no model downloads and
-   each one carries a `userData.sight` point: the exact spot the eye looks
-   through. Aiming down sights then just translates the model so that point
-   lands on the screen centre, which means iron sights, red dots and scopes all
-   line up correctly without any hand-tuned offsets.
+   Guns come from the supplied pack when it has loaded, and are assembled from
+   primitives otherwise — knives and grenades always are. Either way each model
+   carries a `userData.sight` point: the exact spot the eye looks through.
+   Aiming down sights then just translates the model so that point lands on the
+   screen centre, which means iron sights, red dots and scopes all line up
+   without any hand-tuned offsets.
 
    Convention: barrel along -Z, up +Y, right +X, origin at the grip.
    ══════════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { packWeapon } from './WeaponAssets.js';
 
 const M = {
   gunmetal: () => new THREE.MeshStandardMaterial({ color: 0x35393f, metalness: 0.74, roughness: 0.4 }),
@@ -21,8 +23,13 @@ const M = {
   brass:    () => new THREE.MeshStandardMaterial({ color: 0xb08d3e, metalness: 0.9, roughness: 0.32 }),
   wood:     () => new THREE.MeshStandardMaterial({ color: 0x7d5730, metalness: 0.0, roughness: 0.68 }),
   glass:    () => new THREE.MeshStandardMaterial({
-    color: 0x1b3348, metalness: 1, roughness: 0.06, transparent: true, opacity: 0.6,
-    envMapIntensity: 1.4,
+    color: 0x9fc8e8, metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.13,
+    envMapIntensity: 1.6, depthWrite: false, side: THREE.DoubleSide,
+  }),
+  // Open-ended tubes are seen from the inside once you put your eye behind
+  // them, so their walls have to render from both faces.
+  tube:     () => new THREE.MeshStandardMaterial({
+    color: 0x2b2f34, metalness: 0.7, roughness: 0.45, side: THREE.DoubleSide,
   }),
   dot:      () => new THREE.MeshBasicMaterial({ color: 0xff3322, toneMapped: false }),
 };
@@ -61,52 +68,73 @@ function rail(len, x, y, z, m = 'black') {
 
 function redDot(y, z) {
   const g = new THREE.Group();
-  g.add(box(0.036, 0.03, 0.062, 0, y + 0.014, z, 'black'));            // body
-  g.add(box(0.03, 0.008, 0.02, 0, y - 0.004, z, 'black'));             // mount
-  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.0135, 16), mat('glass'));
-  lens.position.set(0, y + 0.016, z + 0.031);
-  lens.rotation.y = Math.PI;
+  // The housing is a frame with an open middle, not a solid block: the whole
+  // point of the sight is that you look through it.
+  const W = 0.019, T = 0.005, L = 0.062;
+  g.add(box(W * 2 + T * 2, T, L, 0, y + 0.016 + W, z, 'black'));   // top
+  g.add(box(W * 2 + T * 2, T, L, 0, y + 0.016 - W, z, 'black'));   // bottom
+  g.add(box(T, W * 2, L, -W - T / 2, y + 0.016, z, 'black'));      // left
+  g.add(box(T, W * 2, L, W + T / 2, y + 0.016, z, 'black'));       // right
+  g.add(box(0.03, 0.01, 0.02, 0, y - 0.002, z, 'black'));          // mount
+  g.add(box(0.026, 0.006, 0.05, 0, y - 0.008, z, 'gunmetal'));
+
+  const lens = new THREE.Mesh(new THREE.PlaneGeometry(W * 2, W * 2), mat('glass'));
+  lens.position.set(0, y + 0.016, z - L / 2 + 0.004);
   g.add(lens);
-  const lensB = lens.clone();
-  lensB.position.z = z - 0.031;
-  lensB.rotation.y = 0;
-  g.add(lensB);
-  // The dot sits at the very back of the tube so nothing draws over it.
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0030, 10), mat('dot'));
-  dot.position.set(0, y + 0.016, z + 0.0324);
+
+  // Reticle sits at the rear of the tube so nothing draws over it.
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0028, 10), mat('dot'));
+  dot.position.set(0, y + 0.016, z + L / 2 - 0.003);
   dot.rotation.y = Math.PI;
   g.add(dot);
-  const halo = new THREE.Mesh(new THREE.RingGeometry(0.0034, 0.0062, 14),
-    new THREE.MeshBasicMaterial({ color: 0xff3322, transparent: true, opacity: 0.28, toneMapped: false, depthWrite: false }));
-  halo.position.set(0, y + 0.016, z + 0.0322);
+  const halo = new THREE.Mesh(new THREE.RingGeometry(0.0032, 0.0058, 14),
+    new THREE.MeshBasicMaterial({
+      color: 0xff3322, transparent: true, opacity: 0.3, toneMapped: false, depthWrite: false,
+    }));
+  halo.position.copy(dot.position);
   halo.rotation.y = Math.PI;
   g.add(halo);
+
   g.userData.sight = new THREE.Vector3(0, y + 0.016, z);
   return g;
 }
 
 function holoSight(y, z) {
   const g = new THREE.Group();
-  g.add(box(0.042, 0.022, 0.086, 0, y + 0.012, z, 'black'));
-  g.add(box(0.05, 0.032, 0.014, 0, y + 0.02, z - 0.036, 'black'));
-  const win = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.024), mat('glass'));
-  win.position.set(0, y + 0.02, z - 0.028);
+  // Hooded window: a frame around clear air, open front to back.
+  const W = 0.021, H = 0.017, T = 0.005, L = 0.08;
+  g.add(box(W * 2 + T * 2, T, L, 0, y + 0.02 + H, z, 'black'));
+  g.add(box(T, H * 2, L, -W - T / 2, y + 0.02, z, 'black'));
+  g.add(box(T, H * 2, L, W + T / 2, y + 0.02, z, 'black'));
+  g.add(box(W * 2 + T * 2, 0.02, 0.026, 0, y + 0.006, z + L / 2 - 0.013, 'black'));  // rear body
+  g.add(box(0.03, 0.008, 0.05, 0, y - 0.002, z, 'gunmetal'));                        // mount
+
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(W * 2, H * 2), mat('glass'));
+  win.position.set(0, y + 0.02, z - L / 2 + 0.006);
   g.add(win);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0058, 0.0076, 18), mat('dot'));
-  ring.position.set(0, y + 0.02, z - 0.0268);
+
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.0062, 0.0082, 20), mat('dot'));
+  ring.position.set(0, y + 0.02, z - L / 2 + 0.008);
   g.add(ring);
-  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0024, 10), mat('dot'));
-  dot.position.set(0, y + 0.02, z - 0.0266);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0022, 10), mat('dot'));
+  dot.position.copy(ring.position);
   g.add(dot);
+
   g.userData.sight = new THREE.Vector3(0, y + 0.02, z);
   return g;
 }
 
 function telescopic(y, z, length = 0.24, objective = 0.026) {
   const g = new THREE.Group();
-  g.add(cyl(objective, objective, 0.05, 0, y + 0.02, z - length / 2 + 0.02, 'black', 'z', 16));
-  g.add(cyl(0.016, 0.016, length * 0.72, 0, y + 0.02, z, 'black', 'z', 16));
-  g.add(cyl(0.021, 0.021, 0.05, 0, y + 0.02, z + length / 2 - 0.02, 'black', 'z', 16));
+  const openTube = (r, len, oz) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 16, 1, true), mat('tube'));
+    m.position.set(0, y + 0.02, oz);
+    m.rotation.x = Math.PI / 2;
+    return m;
+  };
+  g.add(openTube(objective, 0.05, z - length / 2 + 0.02));
+  g.add(openTube(0.016, length * 0.72, z));
+  g.add(openTube(0.021, 0.05, z + length / 2 - 0.02));
   g.add(cyl(0.023, 0.023, 0.024, 0, y + 0.02, z + 0.01, 'gunmetal', 'z', 16));  // turret housing
   g.add(cyl(0.008, 0.008, 0.016, 0, y + 0.042, z + 0.01, 'gunmetal', 'y', 10)); // elevation turret
   g.add(cyl(0.008, 0.008, 0.016, 0.02, y + 0.02, z + 0.01, 'gunmetal', 'x', 10)); // windage
@@ -118,10 +146,8 @@ function telescopic(y, z, length = 0.24, objective = 0.026) {
   lens.position.set(0, y + 0.02, z - length / 2 + 0.045);
   lens.rotation.y = Math.PI;
   g.add(lens);
-  const eye = new THREE.Mesh(new THREE.CircleGeometry(0.017, 16),
-    new THREE.MeshBasicMaterial({ color: 0x05070a, toneMapped: false }));
-  eye.position.set(0, y + 0.02, z + length / 2 - 0.044);
-  g.add(eye);
+  // No eyepiece disc: the tube stays open so a half-raised scope still shows
+  // the world rather than a black plug.
   g.userData.sight = new THREE.Vector3(0, y + 0.02, z);
   return g;
 }
@@ -494,10 +520,82 @@ function mergeStatic(group) {
   return group;
 }
 
+/* ── the supplied pack ────────────────────────────────────────────────────── */
+
+/* Families whose optic is a magnified scope: the game renders those through a
+   second camera, so they get no painted reticle of their own. */
+const SCOPED = new Set(['sniper', 'dmr']);
+
+/** Glowing aiming point, sitting on the front lens the way a real dot does. */
+function reticle(at) {
+  const g = new THREE.Group();
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0026, 12),
+    new THREE.MeshBasicMaterial({ color: 0xff3a22, toneMapped: false, side: THREE.DoubleSide, depthWrite: false }));
+  dot.position.copy(at);
+  dot.renderOrder = 6;
+  const halo = new THREE.Mesh(new THREE.RingGeometry(0.003, 0.0062, 16),
+    new THREE.MeshBasicMaterial({
+      color: 0xff3a22, transparent: true, opacity: 0.28, toneMapped: false,
+      side: THREE.DoubleSide, depthWrite: false,
+    }));
+  halo.position.copy(at);
+  halo.renderOrder = 6;
+  g.add(dot, halo);
+  return g;
+}
+
+/** Screw-on can for the covert pistol, which the pack model does not carry. */
+function suppressor(muzzle) {
+  const g = new THREE.Group();
+  const can = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.13, 14), mat('black'));
+  can.rotation.x = Math.PI / 2;
+  can.position.set(muzzle.x, muzzle.y, muzzle.z - 0.055);
+  g.add(can);
+  for (let i = 0; i < 4; i++) {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0182, 0.0182, 0.005, 14), mat('gunmetal'));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(muzzle.x, muzzle.y, muzzle.z - 0.015 - i * 0.03);
+    g.add(ring);
+  }
+  return g;
+}
+
+const packCache = new Map();
+
+function packModel(kind, asset) {
+  let proto = packCache.get(kind);
+  if (!proto) {
+    proto = new THREE.Group();
+    const mesh = new THREE.Mesh(asset.geometry, asset.material);
+    mesh.name = 'body';
+    mesh.frustumCulled = false;
+    proto.add(mesh);
+
+    const a = asset.anchors;
+    const muzzle = a.muzzle.clone();
+    if (kind === 'pistolSupp') {
+      proto.add(suppressor(muzzle));
+      muzzle.z -= 0.125;
+    }
+    if (!SCOPED.has(kind)) proto.add(reticle(a.lens));
+    proto.userData = { sight: a.sight.clone(), muzzle, eject: a.eject.clone() };
+    packCache.set(kind, proto);
+  }
+  const inst = proto.clone(true);
+  inst.userData = {
+    sight: proto.userData.sight.clone(),
+    muzzle: proto.userData.muzzle.clone(),
+    eject: proto.userData.eject.clone(),
+  };
+  return inst;
+}
+
 const cache = new Map();
 
 /** Builds (and caches a prototype of) a weapon model. Returns a fresh clone. */
 export function buildWeaponModel(kind) {
+  const asset = packWeapon(kind);
+  if (asset) return packModel(kind, asset);
   if (!cache.has(kind)) {
     const fn = BUILDERS[kind] ?? BUILDERS.ar;
     const proto = fn();

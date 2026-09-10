@@ -223,6 +223,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;background:v
 #hitmarker.kill{filter:sepia(1) saturate(6) hue-rotate(-32deg)}
 @keyframes hm{0%{opacity:1;transform:scale(.6)}60%{opacity:1;transform:scale(1.12)}100%{opacity:0;transform:scale(1.2)}}
 
+#blood-layer{position:absolute;inset:0;overflow:hidden}
+.blood-splat{position:absolute;opacity:0;background-repeat:no-repeat;background-size:100% 100%;
+  will-change:opacity,transform;mix-blend-mode:multiply;filter:saturate(1.15) contrast(1.08)}
 #damage-vignette{position:absolute;inset:0;opacity:0;transition:opacity .35s ease-out;
   background:radial-gradient(105% 78% at 50% 50%,transparent 42%,rgba(150,0,0,.62) 100%)}
 #flash-overlay{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}

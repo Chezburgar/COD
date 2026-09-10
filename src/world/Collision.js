@@ -162,7 +162,7 @@ export class CollisionWorld {
    * time and auto-stepping small ledges. Mutates `pos` (feet centre).
    * @returns {{ ground:boolean, ceiling:boolean, wall:boolean, groundMat:string, groundNormal:THREE.Vector3, stepped:number }}
    */
-  moveCharacter(pos, radius, height, delta, stepHeight = 0.55) {
+  moveCharacter(pos, radius, height, delta, stepHeight = 0.55, snapToGround = false) {
     const res = {
       ground: false, ceiling: false, wall: false, wallNormal: new THREE.Vector3(),
       groundMat: 'concrete', groundNormal: new THREE.Vector3(0, 1, 0), stepped: 0,
@@ -207,12 +207,25 @@ export class CollisionWorld {
 
     // ── vertical ────────────────────────────────────────────────────────
     pos.y += delta.y;
-    const floor = this.floorAt(pos.x, pos.z, pos.y + Math.max(0.02, -delta.y) + 0.02, radius, solids);
-    if (floor !== null && pos.y <= floor + 0.001) {
-      pos.y = floor;
-      res.ground = true;
-      const fb = this._floorBrush;
-      if (fb) { res.groundMat = fb.mat; fb.topNormal(res.groundNormal); }
+    // Walking up a slope moves you forward into ground that is now *above*
+    // your feet. Searching only downward finds nothing there, which used to
+    // leave the character inside the wedge — the "phasing through ramps".
+    // While already grounded and not moving upward, look a step-height above
+    // as well, and glue to a surface just below so descending slopes don't
+    // turn every frame into a little fall.
+    const searchFrom = snapToGround
+      ? pos.y + stepHeight
+      : pos.y + Math.max(0.02, -delta.y) + 0.02;
+    const floor = this.floorAt(pos.x, pos.z, searchFrom, radius, solids);
+    if (floor !== null) {
+      const climbing = pos.y <= floor + 0.001;
+      const glued = snapToGround && pos.y - floor <= stepHeight;
+      if (climbing || glued) {
+        pos.y = floor;
+        res.ground = true;
+        const fb = this._floorBrush;
+        if (fb) { res.groundMat = fb.mat; fb.topNormal(res.groundNormal); }
+      }
     }
     // Ceiling: reject if the head is inside anything.
     const headY = pos.y + height;

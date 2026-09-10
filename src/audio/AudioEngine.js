@@ -33,12 +33,16 @@ export const GUN_VOICES = {
   supp:    { punch: 0.30, crack: 0.30, body: 0.40, bodyHz: 900,  len: 0.30, mech: 0.60, bright: 1.0, supp: 0.9 },
 };
 
+/* The one sampled asset in the game: everything else is generated at boot. */
+const THEME_URL = new URL('../assets/menu-theme.mp3', import.meta.url).href;
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.ready = false;
     this.bank = new Map();
-    this.volumes = { master: 0.85, sfx: 1, music: 0.5, ui: 0.8 };
+    // Music sits well under the guns: it is a bed, not a soundtrack.
+    this.volumes = { master: 0.85, sfx: 1, music: 0.3, ui: 0.8 };
     this._pannerPool = [];
     this._voices = 0;
     this._maxVoices = 40;
@@ -47,6 +51,8 @@ export class AudioEngine {
     this._tinnitusGain = null;
     this._ambienceSrc = null;
     this._musicSrc = null;
+    this._menuWanted = false;
+    this.themeBuf = null;
     this._listenerPos = { x: 0, y: 0, z: 0 };
   }
 
@@ -412,23 +418,58 @@ export class AudioEngine {
     setTimeout(() => { try { s.stop(); } catch { /* already stopped */ } }, 1600);
   }
 
-  startMenuBed() {
-    if (!this.ctx || !this.menuBuf || this._musicSrc) return;
+  /* ── menu music ────────────────────────────────────────────────────────
+     The menu theme is the one piece of audio that is a file rather than
+     synthesised, so it is fetched in the background: the synthesised bed
+     covers the menu from the first frame and the theme fades in over it
+     whenever it finishes decoding. */
+
+  _loadTheme() {
+    if (this.themeBuf || this._themeFailed) return Promise.resolve(this.themeBuf);
+    this._themeReq ??= fetch(THEME_URL)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))))
+      .then((b) => this.ctx.decodeAudioData(b))
+      .then((buf) => (this.themeBuf = buf))
+      .catch(() => { this._themeFailed = true; return null; });
+    return this._themeReq;
+  }
+
+  _playMusic(buffer, volume, fade) {
     const s = this.ctx.createBufferSource();
-    s.buffer = this.menuBuf; s.loop = true;
+    s.buffer = buffer; s.loop = true;
     const g = this.ctx.createGain(); g.gain.value = 0;
     s.connect(g).connect(this.musicBus);
     s.start();
-    g.gain.setTargetAtTime(0.7, this.ctx.currentTime, 2);
+    g.gain.setTargetAtTime(volume, this.ctx.currentTime, fade);
     this._musicSrc = { s, g };
   }
 
+  _fadeOutMusic(src, fade = 0.6) {
+    if (!src) return;
+    src.g.gain.setTargetAtTime(0, this.ctx.currentTime, fade);
+    setTimeout(() => { try { src.s.stop(); } catch { /* already stopped */ } }, fade * 4000 + 400);
+  }
+
+  startMenuBed() {
+    if (!this.ctx || this._musicSrc) return;
+    this._menuWanted = true;
+    if (this.themeBuf) { this._playMusic(this.themeBuf, 0.5, 1.2); return; }
+    if (this.menuBuf) this._playMusic(this.menuBuf, 0.34, 2);
+    this._loadTheme().then((buf) => {
+      if (!buf || !this._menuWanted) return;
+      const bed = this._musicSrc;
+      this._musicSrc = null;
+      this._fadeOutMusic(bed, 0.8);
+      this._playMusic(buf, 0.5, 1.4);
+    });
+  }
+
   stopMenuBed() {
+    this._menuWanted = false;
     if (!this._musicSrc) return;
-    const { s, g } = this._musicSrc;
+    const src = this._musicSrc;
     this._musicSrc = null;
-    g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.5);
-    setTimeout(() => { try { s.stop(); } catch { /* already stopped */ } }, 2500);
+    this._fadeOutMusic(src, 0.5);
   }
 
   /** Convenience wrappers used all over the game code. */

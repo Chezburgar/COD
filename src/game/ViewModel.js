@@ -8,12 +8,15 @@
    lands dead centre, which is why iron sights, red dots and scopes all align.
    ══════════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
-import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildWeaponModel } from './WeaponModels.js';
+import { packWeapon } from './WeaponAssets.js';
+import { FirstPersonArms } from './FirstPersonArms.js';
+import { getCharacterAssets } from './Character.js';
 import { clamp, clamp01, damp, lerp, rand, smoothstep, TAU } from '../core/MathUtils.js';
 import { softSprite } from '../world/Textures.js';
 
-/* Where each hand sits on each weapon family, in model space. */
+/* Where the firing hand sits on each weapon family, in model space, plus how
+   the arm assembly is twisted to seat naturally on that particular grip. */
 const GRIPS = {
   ar:        { r: [0.0, -0.055, 0.05], l: [0.0, -0.02, -0.2] },
   smg:       { r: [0.0, -0.055, 0.04], l: [0.0, -0.035, -0.15] },
@@ -38,12 +41,34 @@ const VM_SCALE = 0.7;
 /* Resting pose per family (hip fire). */
 const HIP = {
   default:  { pos: [0.126, -0.118, -0.33], rot: [0.015, 0.055, -0.02] },
-  pistol:   { pos: [0.102, -0.104, -0.29], rot: [0.02, 0.06, -0.02] },
+  pistol:   { pos: [0.108, -0.112, -0.40], rot: [0.02, 0.06, -0.02] },
   knife:    { pos: [0.146, -0.122, -0.26], rot: [0.16, -0.38, 0.24] },
   grenade:  { pos: [0.140, -0.140, -0.28], rot: [0.08, -0.16, 0.08] },
   sniper:   { pos: [0.142, -0.126, -0.37], rot: [0.015, 0.05, -0.02] },
   lmg:      { pos: [0.144, -0.136, -0.35], rot: [0.015, 0.05, -0.02] },
 };
+
+/* Per-family arm tuning: where the elbow is carried, how the wrist is pitched
+   onto the grip, and small nudges for grips that do not sit where the generic
+   rifle hold expects. */
+const ARM_TUNING = {
+  default:    { elbowOut: 0.85, wristPitch: -0.35, leftAim: 0.5, rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  ar:         { elbowOut: 0.85, wristPitch: -0.35, leftAim: 0.55, rightOffset: [0, 0, 0], leftOffset: [0, 0.01, 0] },
+  smg:        { elbowOut: 0.9,  wristPitch: -0.35, leftAim: 0.5, rightOffset: [0, 0, 0], leftOffset: [0, 0.01, 0] },
+  lmg:        { elbowOut: 0.85, wristPitch: -0.32, leftAim: 0.55, rightOffset: [0, 0, 0], leftOffset: [0, 0.01, 0] },
+  dmr:        { elbowOut: 0.85, wristPitch: -0.35, leftAim: 0.55, rightOffset: [0, 0, 0], leftOffset: [0, 0.01, 0] },
+  sniper:     { elbowOut: 0.8,  wristPitch: -0.32, leftAim: 0.5, rightOffset: [0, 0, 0], leftOffset: [0, 0.01, 0] },
+  shotgun:    { elbowOut: 0.85, wristPitch: -0.35, leftAim: 0.5, rightOffset: [0, 0, 0], leftOffset: [0, 0.01, 0] },
+  pistol:     { elbowOut: 0.55, wristPitch: -0.6, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  pistolSupp: { elbowOut: 0.55, wristPitch: -0.6, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  revolver:   { elbowOut: 0.55, wristPitch: -0.6, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  knife:      { elbowOut: 0.7,  wristPitch: -0.1, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  frag:       { elbowOut: 0.7,  wristPitch: -0.2, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  flash:      { elbowOut: 0.7,  wristPitch: -0.2, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+  smoke:      { elbowOut: 0.7,  wristPitch: -0.2, leftAim: 0.0,  rightOffset: [0, 0, 0], leftOffset: [0, 0, 0] },
+};
+
+const PISTOLS = new Set(['pistol', 'pistolSupp', 'revolver']);
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -138,77 +163,33 @@ export class ViewModel {
   }
 
   /* ── arms ──────────────────────────────────────────────────────────────── */
-  _buildArms(kind) {
-    const g = new THREE.Group();
-    const sleeve = new THREE.MeshStandardMaterial({ color: 0x4a4f43, roughness: 0.85, metalness: 0.02 });
-    const glove = new THREE.MeshStandardMaterial({ color: 0x2b2b2c, roughness: 0.72, metalness: 0.05 });
-    const grip = GRIPS[kind] ?? GRIPS.ar;
-
-    const arm = (target, fromX, fromY, fromZ) => {
-      const a = new THREE.Group();
-      const to = new THREE.Vector3(...target);
-      const from = new THREE.Vector3(fromX, fromY, fromZ);
-      const dir = _v.copy(to).sub(from);
-      const len = dir.length();
-
-      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.028, len * 0.92, 8), sleeve);
-      fore.position.copy(from).add(to).multiplyScalar(0.5);
-      fore.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-      a.add(fore);
-
-      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.033, 0.03, 8), glove);
-      cuff.position.copy(to).addScaledVector(dir, -0.05);
-      cuff.quaternion.copy(fore.quaternion);
-      a.add(cuff);
-
-      const hand = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.062, 0.048), glove);
-      hand.position.copy(to);
-      hand.quaternion.copy(fore.quaternion);
-      a.add(hand);
-
-      for (let i = 0; i < 3; i++) {
-        const f = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.03, 0.04), glove);
-        f.position.copy(to).add(new THREE.Vector3(-0.016 + i * 0.016, -0.03, 0.006));
-        a.add(f);
-      }
-      return a;
-    };
-
-    g.add(arm(grip.r, 0.14, -0.28, 0.26));
-    if (grip.l) g.add(arm(grip.l, -0.18, -0.26, 0.12));
-
-    // Bake both arms down to one mesh per material.
-    g.updateMatrixWorld(true);
-    const buckets = new Map();
-    g.traverse((o) => {
-      if (!o.isMesh) return;
-      const geo = o.geometry.clone();
-      geo.applyMatrix4(o.matrixWorld);
-      let arr = buckets.get(o.material);
-      if (!arr) buckets.set(o.material, (arr = []));
-      arr.push(geo);
-    });
-    const merged = new THREE.Group();
-    for (const [material, geos] of buckets) {
-      const m = geos.length === 1 ? geos[0] : BufferGeometryUtils.mergeGeometries(geos, false);
-      if (!m) continue;
-      const mesh = new THREE.Mesh(m, material);
-      mesh.castShadow = false;
-      mesh.frustumCulled = false;
-      merged.add(mesh);
+  /**
+   * Seats the operator's own arms on the current weapon. Built once and then
+   * re-placed, since the pose is rigid relative to the gun.
+   */
+  _placeArms(kind) {
+    if (!this.arms) {
+      const assets = getCharacterAssets();
+      if (!assets) return;
+      this.arms = new FirstPersonArms(assets);
+      if (!this.arms.ok) { this.arms = null; return; }
+      this.rig.add(this.arms.group);
     }
-    return merged;
+    // Pack weapons carry their own measured grips; the procedural fallbacks
+    // and the knife and grenades use the table above.
+    const grip = packWeapon(kind)?.grips ?? GRIPS[kind] ?? GRIPS.ar;
+    this.arms.group.visible = true;
+    this.arms.gripWeapon({ right: grip.r, left: grip.l }, ARM_TUNING[kind] ?? ARM_TUNING.default);
   }
 
   /* ── weapon swap ───────────────────────────────────────────────────────── */
   setWeapon(weapon) {
     if (this.model) this.rig.remove(this.model);
-    if (this.arms) this.rig.remove(this.arms);
     this.weapon = weapon;
     this.kind = weapon.model;
     this.model = buildWeaponModel(weapon.model);
-    this.arms = this._buildArms(weapon.model);
-    this.rig.add(this.arms, this.model);
+    this.rig.add(this.model);
+    this._placeArms(weapon.model);
 
     this.magNode = this.model.getObjectByName('magazine');
     this.boltNode = this.model.getObjectByName('bolt');
@@ -216,7 +197,7 @@ export class ViewModel {
     this.boltHome = this.boltNode ? this.boltNode.position.clone() : null;
 
     const hipKey = weapon.melee ? 'knife'
-      : weapon.model === 'pistol' || weapon.model === 'pistolSupp' || weapon.model === 'revolver' ? 'pistol'
+      : PISTOLS.has(weapon.model) ? 'pistol'
       : weapon.model === 'sniper' ? 'sniper'
       : weapon.model === 'lmg' ? 'lmg'
       : HIP[weapon.model] ? weapon.model : 'default';
@@ -230,7 +211,11 @@ export class ViewModel {
     const k = VM_SCALE;
     // Far enough out that the receiver doesn't loom; the sight stays centred
     // either way because the pose is solved from it.
-    const adsDist = weapon.sight === 'scope' ? 0.24 : 0.30;
+    // How far the optic ends up from the eye. A pistol is held at arm's
+    // length, and pushing it out there also keeps the forearms from filling
+    // the frame; a scope has to come closer for the eye box to work.
+    const adsDist = weapon.sight === 'scope' ? 0.24
+      : PISTOLS.has(weapon.model) ? 0.42 : 0.33;
     this.adsPos = new THREE.Vector3(-s.x * k, -s.y * k, -adsDist - s.z * k);
     this.adsRot = new THREE.Euler(0, 0, 0);
 
@@ -414,12 +399,19 @@ export class ViewModel {
     this.lowerBlend = damp(this.lowerBlend, st.lowered ?? 0, 14, dt);
 
     // ── sway: the gun lags behind the aim, springing back ──────────────
+    // The spring is stiff enough to blow up if a whole frame is integrated at
+    // once on a slow machine, so it runs on fixed sub-steps. Splitting the
+    // frame's look delta across them leaves the feel identical at any rate.
     const swayScale = lerp(1, 0.3, this.adsBlend);
-    this.swayVel.x += (-st.lookDx * 0.9 - this.sway.x * 22) * dt * 60 * swayScale;
-    this.swayVel.y += (st.lookDy * 0.9 - this.sway.y * 22) * dt * 60 * swayScale;
-    this.swayVel.multiplyScalar(Math.exp(-14 * dt));
-    this.sway.x = clamp(this.sway.x + this.swayVel.x * dt, -0.09, 0.09);
-    this.sway.y = clamp(this.sway.y + this.swayVel.y * dt, -0.07, 0.07);
+    for (let left = dt; left > 0;) {
+      const h = Math.min(left, 1 / 120);
+      left -= h;
+      this.swayVel.x += (-st.lookDx * 0.9 - this.sway.x * 22) * h * 60 * swayScale;
+      this.swayVel.y += (st.lookDy * 0.9 - this.sway.y * 22) * h * 60 * swayScale;
+      this.swayVel.multiplyScalar(Math.exp(-14 * h));
+      this.sway.x = clamp(this.sway.x + this.swayVel.x * h, -0.09, 0.09);
+      this.sway.y = clamp(this.sway.y + this.swayVel.y * h, -0.07, 0.07);
+    }
 
     // ── bob ─────────────────────────────────────────────────────────────
     const bobSpeed = st.speed01 * (1 + st.sprint * 0.5);
@@ -535,6 +527,6 @@ export class ViewModel {
 
   dispose() {
     if (this.model) this.rig.remove(this.model);
-    if (this.arms) this.rig.remove(this.arms);
+    if (this.arms) { this.rig.remove(this.arms.group); this.arms.dispose(); this.arms = null; }
   }
 }

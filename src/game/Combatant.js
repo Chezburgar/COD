@@ -224,6 +224,8 @@ export class Combatant {
       if (hs > cap) { this.vel.x *= cap / hs; this.vel.z *= cap / hs; }
     }
 
+    const wasGrounded = this.grounded;
+
     // Jump.
     if ((b & BTN.jump) && this.grounded && !this.sliding) {
       this.vel.y = MOVE.jump;
@@ -234,10 +236,12 @@ export class Combatant {
     this.vel.y = Math.max(this.vel.y, -48);
 
     // ── integrate + collide ─────────────────────────────────────────
-    const wasGrounded = this.grounded;
     const fallSpeed = -this.vel.y;
     _v.set(this.vel.x * dt, this.vel.y * dt, this.vel.z * dt);
-    const res = world.moveCharacter(this.pos, MOVE.radius, this.bodyHeight(), _v, MOVE.step);
+    // Stay glued to the ground while walking, so slopes are followed rather
+    // than fallen down — but never while rising, or jumps would be cancelled.
+    const stick = wasGrounded && this.vel.y <= 0.01 && !(b & BTN.jump);
+    const res = world.moveCharacter(this.pos, MOVE.radius, this.bodyHeight(), _v, MOVE.step, stick);
     this.grounded = res.ground;
     this.groundMat = res.groundMat;
     if (res.ground) { if (this.vel.y < 0) this.vel.y = 0; }
