@@ -18,7 +18,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      pages-ready: ${{ steps.pages.outcome == 'success' }}
+      mode: ${{ steps.state.outputs.build_type }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,31 +28,41 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      # Creating a Pages site needs repository-admin rights that the workflow
-      # token does not have, so this is allowed to fail: the build still passes
-      # and the deploy job simply waits until someone turns Pages on.
-      - id: pages
-        uses: actions/configure-pages@v5
-        continue-on-error: true
-        with:
-          enablement: true
+      # Pages can be off, served from a branch, or served from a workflow, and
+      # this job has something different to do in each case. Ask first rather
+      # than assuming — deploying into a branch-served site just fails.
+      - id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build_type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type' 2>/dev/null || echo none)
+          echo "build_type=$build_type" >> "$GITHUB_OUTPUT"
+          echo "Pages build type: $build_type"
 
-      - if: steps.pages.outcome == 'success'
+      - if: steps.state.outputs.build_type == 'workflow'
+        uses: actions/configure-pages@v5
+      - if: steps.state.outputs.build_type == 'workflow'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
 
-      - if: steps.pages.outcome != 'success'
+      - if: steps.state.outputs.build_type == 'legacy'
+        run: |
+          echo "::notice title=Served from a branch::Pages is publishing ${GITHUB_REF_NAME}/docs directly."
+          echo "The freshly built site is committed there, so this push is already live."
+          echo "Switch Settings -> Pages to source 'GitHub Actions' if you would rather this workflow published it."
+
+      - if: steps.state.outputs.build_type == 'none'
         run: |
           echo "::notice title=GitHub Pages is not enabled::The site built fine but there is nowhere to publish it yet."
           echo "Enable it once under Settings -> Pages, either way:"
-          echo "  * Source 'GitHub Actions'      - this workflow publishes on every push."
-          echo "  * Source 'Deploy from a branch' -> branch ${GITHUB_REF_NAME}, folder /docs"
-          echo "    (the built site is committed there, so it works immediately)."
+          echo "  * Deploy from a branch -> branch ${GITHUB_REF_NAME}, folder /docs"
+          echo "    (the built site is committed there, so it goes live immediately)"
+          echo "  * GitHub Actions - this workflow then publishes on every push."
 
   deploy:
     needs: build
-    if: needs.build.outputs.pages-ready == 'true'
+    if: needs.build.outputs.mode == 'workflow'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
