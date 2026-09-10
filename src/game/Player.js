@@ -243,7 +243,9 @@ export class LocalPlayer {
     const wantLower = wallHit && c.adsAmount < 0.3 && !w.melee ? clamp01(1 - wallHit.t / 0.85) : 0;
     this.lowered = damp(this.lowered, wantLower, 12, dt);
 
-    this.vm.hidden = this.scopeBlend > 0.92;
+    // Derived from state rather than events, so a missed respawn callback
+    // can never leave the player holding an invisible weapon.
+    this.vm.hidden = this.scopeBlend > 0.92 || !c.alive;
     this.vm.update({
       dt,
       lookDx: this.input.mouse.dx * 0.02,
