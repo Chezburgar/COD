@@ -35,7 +35,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          build_type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type' 2>/dev/null || echo none)
+          # gh prints the 404 body on stdout, so capture and then validate
+          # rather than trusting whatever came back.
+          build_type=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.build_type' 2>/dev/null) || build_type=""
+          case "$build_type" in
+            workflow|legacy) ;;
+            *) build_type=none ;;
+          esac
           echo "build_type=$build_type" >> "$GITHUB_OUTPUT"
           echo "Pages build type: $build_type"
 
