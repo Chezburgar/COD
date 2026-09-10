@@ -17,24 +17,42 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages-ready: ${{ steps.pages.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run build
-      - uses: actions/configure-pages@v5
+
+      # Creating a Pages site needs repository-admin rights that the workflow
+      # token does not have, so this is allowed to fail: the build still passes
+      # and the deploy job simply waits until someone turns Pages on.
+      - id: pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
         with:
-          # Turn Pages on automatically the first time this runs.
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
+
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: docs
 
+      - if: steps.pages.outcome != 'success'
+        run: |
+          echo "::notice title=GitHub Pages is not enabled::The site built fine but there is nowhere to publish it yet."
+          echo "Enable it once under Settings -> Pages, either way:"
+          echo "  * Source 'GitHub Actions'      - this workflow publishes on every push."
+          echo "  * Source 'Deploy from a branch' -> branch ${GITHUB_REF_NAME}, folder /docs"
+          echo "    (the built site is committed there, so it works immediately)."
+
   deploy:
     needs: build
+    if: needs.build.outputs.pages-ready == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

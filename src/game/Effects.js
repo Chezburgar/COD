@@ -121,10 +121,17 @@ export class Effects {
   billboard(tex, pos, opts = {}) {
     const b = this.bbs[(this._bbIdx = (this._bbIdx + 1) % this.bbs.length)];
     const m = b.mesh;
-    m.material.map = this.bbTex[tex] ?? tex;
+    // Only flag the material dirty when something that changes the compiled
+    // program actually changed — otherwise every puff of smoke costs a
+    // shader re-evaluation.
+    const map = this.bbTex[tex] ?? tex;
+    const blending = opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+    if (m.material.map !== map || m.material.blending !== blending) {
+      m.material.map = map;
+      m.material.blending = blending;
+      m.material.needsUpdate = true;
+    }
     m.material.color.setHex(opts.color ?? 0xffffff);
-    m.material.blending = opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
-    m.material.needsUpdate = true;
     m.position.copy(pos);
     m.visible = true;
     b.life = b.max = opts.life ?? 1;
@@ -164,9 +171,8 @@ export class Effects {
   decal(kind, pos, normal, size, life = 26) {
     const d = this.decals[(this._decalIdx = (this._decalIdx + 1) % this.decals.length)];
     const m = d.mesh;
-    m.material.map = this.decalTex[kind];
-    m.material.color.setHex(kind === 'blood' ? 0xffffff : 0xffffff);
-    m.material.needsUpdate = true;
+    const map = this.decalTex[kind];
+    if (m.material.map !== map) { m.material.map = map; m.material.needsUpdate = true; }
     m.position.copy(pos).addScaledVector(normal, 0.012);
     _q.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
     m.quaternion.copy(_q);

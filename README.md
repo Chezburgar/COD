@@ -5,6 +5,13 @@ game server, no downloaded audio — the whole thing is a static site.
 
 **▶ Play: https://chezburgar.github.io/COD/**
 
+> **First time?** The site is built and committed, but GitHub Pages has to be switched on
+> once by hand — creating a Pages site needs repository-admin rights that a workflow token
+> doesn't have. Go to **Settings → Pages** and pick either:
+> * **Deploy from a branch** → branch `claude/fps-5v5-team-deathmatch-qfkko2`, folder **`/docs`**
+>   — works immediately, nothing else to run; or
+> * **GitHub Actions** — the included workflow then rebuilds and publishes on every push.
+
 ---
 
 ## What's in it
