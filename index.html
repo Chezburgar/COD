@@ -7,6 +7,24 @@
 <meta name="description" content="Operation Crossfire — a 5v5 online team deathmatch FPS that runs in your browser." />
 <title>Operation Crossfire — 5v5 Team Deathmatch</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0d0f'/%3E%3Cpath d='M16 4v24M4 16h24' stroke='%23ff9d3c' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23ff9d3c' stroke-width='2'/%3E%3C/svg%3E" />
+<!-- root-redirect:start -->
+<script>
+  /* This file is the build's *source* entry: the real script and stylesheet
+     only exist in the built copy under docs/. If it is ever served as-is —
+     GitHub Pages pointed at the branch root rather than /docs — the app cannot
+     start and the visitor gets an unstyled shell. Send them to the built site
+     instead. `vite build` strips this block; see vite.config.js. */
+  (function () {
+    if (location.protocol === 'file:') return;
+    /* The dev server injects its own client script; if that is present this
+       page is being served by Vite and the module entry will resolve. Keying
+       off that rather than the hostname means a local preview of the mistake
+       behaves exactly like the deployed one. */
+    if (document.querySelector('script[src*="/@vite/"]')) return;
+    location.replace('docs/' + location.search + location.hash);
+  })();
+</script>
+<!-- root-redirect:end -->
 </head>
 <body>
 <canvas id="viewport"></canvas>
