@@ -106,12 +106,13 @@ const GradeShader = {
         vec2 sc = c;
         float sr = length(sc) / R;                      // 0 centre, 1 rim
         if (sr < 1.35) {
-          // Distort the sampled image outward like real glass.
-          float k = 0.16;
+          // A hint of glass, no more: enough that the rim is not perfectly
+          // rectilinear, far short of a fisheye.
+          float k = 0.035;
           float f = 1.0 + k * sr * sr;
           vec2 suv = 0.5 + (sc / f) / vec2(uAspect, 1.0);
           vec2 sdir = sr > 0.0001 ? sc / length(sc) : vec2(0.0);
-          vec3 scope = sampleAberrated(tScope, suv, sdir, 0.0032 * sr * sr);
+          vec3 scope = sampleAberrated(tScope, suv, sdir, 0.0014 * sr * sr);
           // Slight warm tint and edge falloff of the glass.
           scope *= mix(vec3(1.02, 1.0, 0.96), vec3(0.34, 0.36, 0.40), smoothstep(0.72, 1.0, sr));
           scope += 0.05 * pow(clamp(1.0 - sr, 0.0, 1.0), 3.0);   // centre bloom off the lens

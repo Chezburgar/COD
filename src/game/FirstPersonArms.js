@@ -250,6 +250,10 @@ export class FirstPersonArms {
 }
 
 const _scratch = new THREE.Vector3();
+/** Grip points arrive either as a stored triple or as a live point to follow. */
 function _tmpVec(base, off) {
-  return _scratch.set(base[0] + (off?.[0] ?? 0), base[1] + (off?.[1] ?? 0), base[2] + (off?.[2] ?? 0));
+  const x = base.isVector3 ? base.x : base[0];
+  const y = base.isVector3 ? base.y : base[1];
+  const z = base.isVector3 ? base.z : base[2];
+  return _scratch.set(x + (off?.[0] ?? 0), y + (off?.[1] ?? 0), z + (off?.[2] ?? 0));
 }

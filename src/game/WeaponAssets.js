@@ -24,18 +24,26 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 
 const URL_ = new URL('../assets/weapons.glb', import.meta.url).href;
 
-/** Which shell of the pack backs each weapon family. */
-export const PACK_INDEX = {
-  lmg: 0,        // heaviest rifle, long handguard and low-power optic
-  ar: 1,         // carbine, collapsible stock, magnified optic
-  sniper: 2,     // bolt action, long telescopic scope, muzzle brake
-  dmr: 3,        // marksman rifle, suppressed, magnified optic
-  revolver: 4,   // long-barrelled revolver on a rail
-  smg: 5,        // folding stock, short barrel
-  shotgun: 6,    // pump action
-  pistol: 7,
-  pistolSupp: 8,
-};
+/**
+ * Which shell of the pack backs each weapon family, longest first.
+ *
+ * The order the shells come out of the file is not stable between exports of
+ * the same pack — it follows triangle count, which changes with every
+ * re-bake — but the guns themselves sort by overall length exactly the way
+ * their roles do, and that has held across every export so far: the bolt rifle
+ * is the longest thing in the box and the compact pistol the shortest.
+ */
+export const BY_LENGTH = [
+  'sniper',      // bolt action, long telescopic scope, muzzle brake
+  'lmg',         // heaviest rifle, long handguard and low-power optic
+  'ar',          // carbine, collapsible stock, magnified optic
+  'shotgun',     // pump action
+  'dmr',         // marksman rifle, suppressed, magnified optic
+  'smg',         // folding stock, short barrel
+  'revolver',    // long-barrelled revolver on a rail
+  'pistol',
+  'pistolSupp',
+];
 
 /** Overall length each family is scaled to, muzzle to butt, in metres. */
 const LENGTH = {
@@ -94,34 +102,33 @@ async function build(onProgress) {
 
   const material = meshes[0]?.material;
   if (material) {
-    // The shells are cut open down the sight line, so their walls have to draw
-    // from the inside too.
+    // Everything the pack authored is kept — colour, metal-rough mask and
+    // normals all carry the detail you look at down the sights. Only two
+    // things change: the shells are cut open down the sight line so their
+    // walls have to draw from the inside, and the sky reflection is pulled
+    // back, since a full-strength mirror of a bright sky reads as chrome.
     material.side = THREE.DoubleSide;
-    // The pack's albedo is a pale, sun-bleached grey. Under the view model's
-    // key light and a sky environment that reads as chrome, so the base colour
-    // is knocked back and the reflections are tamed to gunmetal.
-    // The pack ships a metal-rough map that is almost entirely polished bare
-    // metal, and a material factor can only ever make a mapped surface
-    // shinier — so the map goes and fixed gunmetal values take its place.
-    // Colour and relief still come from the albedo and normal maps.
-    material.metalnessMap = null;
-    material.roughnessMap = null;
-    material.color = new THREE.Color(0x8b8e93);
-    material.metalness = 0.32;
-    material.roughness = 0.66;
-    material.envMapIntensity = 0.5;
+    material.envMapIntensity = 0.7;
   }
 
+  // Longest first, so the mapping survives a re-export.
+  const baked = meshes.map((src) => bake(src));
+  baked.sort((a, b) => span(b) - span(a));
+
   const out = {};
-  for (const [kind, index] of Object.entries(PACK_INDEX)) {
-    const src = meshes[index];
-    if (!src) continue;
-    const geometry = bake(src);
-    const built = shape(geometry, kind);
-    out[kind] = { geometry, material, ...built };
-  }
+  baked.forEach((geometry, i) => {
+    const kind = BY_LENGTH[i];
+    if (!kind) return;
+    out[kind] = { geometry, material, ...shape(geometry, kind) };
+  });
   pack = out;
   return pack;
+}
+
+/** Overall length of a baked shell, which is what identifies it. */
+function span(geo) {
+  geo.computeBoundingBox();
+  return geo.boundingBox.max.z - geo.boundingBox.min.z;
 }
 
 /**
@@ -158,7 +165,9 @@ function shape(geo, kind) {
   geo.scale(...Array(3).fill(LENGTH[kind] / (raw.max.z - raw.min.z)));
   geo.computeBoundingBox();
 
-  const box = geo.boundingBox;
+  // A snapshot, not the live box: the geometry is translated further down and
+  // recomputing its bounds would silently move every measurement taken here.
+  const box = geo.boundingBox.clone();
   const len = box.max.z - box.min.z;
   const height = box.max.y - box.min.y;
   const pos = geo.attributes.position;
@@ -216,32 +225,48 @@ function shape(geo, kind) {
 
   const muzzleZ = box.min.z;
 
-  // ── the underside, read as a run of dips ──────────────────────────────
-  // Below the receiver line a rifle dips twice: once at the firing grip and
-  // again, deeper and further forward, at the magazine. The buttstock also
-  // hangs a little, so only dips comparable to the deepest one count, and the
-  // rearmost of those is the grip.
+  // ── the underside, read as a row of protrusions ───────────────────────
+  // Everything that matters about how a rifle is held hangs below its
+  // receiver line: the buttstock at the very back, then the firing grip, a
+  // shallow trigger guard, and — on a magazine-fed gun — the magazine, which
+  // is the last thing to hang down before the handguard runs clean to the
+  // muzzle. Reading them in that order identifies each one without a table of
+  // per-weapon numbers.
   const rear = [...lowY.slice(0, Math.round(N * 0.62))].filter(Number.isFinite).sort((a, b) => a - b);
   const receiver = rear[Math.round(rear.length * 0.7)] ?? box.min.y;
-  const dips = [];
+  const deep = new Float32Array(N);
+  for (let s = 0; s < N; s++) deep[s] = Math.max(0, receiver - (Number.isFinite(lowY[s]) ? lowY[s] : receiver));
+  let maxDeep = 0;
+  for (let s = 0; s < N; s++) maxDeep = Math.max(maxDeep, deep[s]);
+
+  const runs = [];
   {
-    const thr = receiver - height * 0.14;
     let a = -1;
     for (let s = 0; s < N; s++) {
-      if (lowY[s] < thr) { if (a < 0) a = s; }
-      else if (a >= 0) { dips.push([a, s - 1]); a = -1; }
+      if (deep[s] > maxDeep * 0.45) { if (a < 0) a = s; }
+      else if (a >= 0) { if (s - a >= 3) runs.push([a, s - 1]); a = -1; }
     }
-    if (a >= 0) dips.push([a, N - 1]);
+    if (a >= 0 && N - a >= 3) runs.push([a, N - 1]);
   }
-  const depthOf = ([a, b]) => {
-    let d = 0;
-    for (let s = a; s <= b; s++) d = Math.max(d, receiver - lowY[s]);
-    return d;
-  };
-  const deepest = dips.reduce((m, d) => Math.max(m, depthOf(d)), 0);
-  const real = dips.filter((d) => depthOf(d) > deepest * 0.55 && d[1] - d[0] >= 1);
 
-  let hand, left;
+  // A magazine is the last protrusion, with clear air ahead of it all the way
+  // to the muzzle and another protrusion behind it. A shotgun's trigger guard
+  // sits ahead of its grip, so that one correctly finds nothing.
+  let magRun = null;
+  if (runs.length >= 2) {
+    const last = runs[runs.length - 1];
+    let clear = true;
+    for (let s = last[1] + 1; s <= Math.min(N - 1, last[1] + Math.round(N * 0.12)); s++) {
+      if (deep[s] > maxDeep * 0.12) clear = false;
+    }
+    if (clear) magRun = last;
+  }
+  // The grip is the last protrusion behind the magazine that is not the butt
+  // of the stock, which is the only one that reaches the very back of the gun.
+  const candidates = runs.filter((r) => r[0] > 0 && (!magRun || r[1] < magRun[0]));
+  const gripRun = candidates[candidates.length - 1] ?? runs[0] ?? [Math.round(N * 0.22), Math.round(N * 0.3)];
+
+  let hand, left, magDip = null;
   if (IS_PISTOL.has(kind)) {
     // On a handgun the grip is the back of the gun, so there is nothing to
     // find: the hand simply sits high on the backstrap.
@@ -251,15 +276,19 @@ function shape(geo, kind) {
     // that can actually be seen.
     left = null;
   } else {
-    const grip = real[0] ?? [Math.round(N * 0.22), Math.round(N * 0.3)];
-    hand = new THREE.Vector3(0, receiver - 0.45 * depthOf(grip), zOf((grip[0] + grip[1]) / 2));
+    magDip = magRun;
+    let gripDeep = 0;
+    for (let s = gripRun[0]; s <= gripRun[1]; s++) gripDeep = Math.max(gripDeep, deep[s]);
+    hand = new THREE.Vector3(0, receiver - 0.45 * gripDeep, zOf((gripRun[0] + gripRun[1]) / 2));
 
     // The support hand goes out along the handguard — most of the way to the
     // muzzle on a carbine, but never further than an arm comfortably reaches,
-    // which is what keeps a long rifle from pulling the pose apart.
+    // and never onto the magazine, which is not something anyone holds.
     const reach = Math.min(0.36, Math.max(0.16, (hand.z - muzzleZ) * 0.52));
-    const grab = sliceOf(hand.z - reach);
-    left = new THREE.Vector3(0, lowY[grab] - 0.022, zOf(grab));
+    let grab = sliceOf(hand.z - reach);
+    if (magRun && grab >= magRun[0] - 1 && grab <= magRun[1] + 1) grab = Math.min(N - 1, magRun[1] + 2);
+    const under = Math.max(Number.isFinite(lowY[grab]) ? lowY[grab] : receiver, receiver - 0.055);
+    left = new THREE.Vector3(0, under - 0.022, zOf(grab));
   }
 
   // ── muzzle: the centre of whatever is left at the far end ─────────────
@@ -283,10 +312,110 @@ function shape(geo, kind) {
   const eject = new THREE.Vector3(geo.boundingBox.max.x * 0.8, sight.y - 0.03, sight.z + 0.03);
   const lens = new THREE.Vector3(sight.x, sight.y, oz0 + delta.z + 0.014);
 
+  const magazine = magDip
+    ? takeMagazine(geo, zOf(magDip[1] + 0.7) + delta.z, zOf(magDip[0] - 0.7) + delta.z,
+      receiver - height * 0.1 + delta.y)
+    : kind === 'pistol' || kind === 'pistolSupp'
+      ? gripMagazine(box, gripRun, zOf, receiver, delta)
+      : null;
+
   return {
+    magazine,
     anchors: { muzzle, sight, eject, lens, length: len, height },
     grips: { r: target.toArray(), l: left ? left.toArray() : null },
   };
+}
+
+/**
+ * A handgun's magazine lives inside its grip, where no amount of cutting will
+ * find it, so one is built to fit: a flat box sized off the grip and parked
+ * inside it, out of sight until a reload pulls it out the bottom.
+ */
+function gripMagazine(box, gripRun, zOf, receiver, delta) {
+  const zBack = zOf(gripRun[0]) + delta.z;
+  const zFront = zOf(gripRun[1]) + delta.z;
+  const depth = Math.abs(zBack - zFront) * 0.52;
+  const width = (box.max.x - box.min.x) * 0.42;
+  const bottom = box.min.y + delta.y;
+  const tall = (receiver + delta.y) - bottom;
+  const geometry = new THREE.BoxGeometry(width, tall * 0.94, depth);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x26292d, metalness: 0.55, roughness: 0.52,
+  });
+  return {
+    geometry,
+    material,
+    // Nudged toward the backstrap, since a grip rakes back as it drops.
+    at: new THREE.Vector3(0, bottom + tall * 0.47, (zBack + zFront) / 2 + Math.abs(zBack - zFront) * 0.07),
+    height: tall * 0.94,
+  };
+}
+
+/**
+ * Lifts the magazine out of the shell into a mesh of its own so a reload can
+ * actually drop it. The triangles are compacted into their own buffers and
+ * re-centred, so the part spins about itself rather than about the receiver
+ * when it tumbles away; what is left keeps the shared buffers and a shorter
+ * index.
+ */
+function takeMagazine(geo, zFront, zBack, yTop) {
+  const pos = geo.attributes.position;
+  const src = geo.index.array;
+  const body = [], mag = [];
+  for (let t = 0; t < src.length; t += 3) {
+    let cy = 0, cz = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = src[t + k];
+      cy += pos.getY(v); cz += pos.getZ(v);
+    }
+    cy /= 3; cz /= 3;
+    const inside = cy < yTop && cz > zFront && cz < zBack;
+    (inside ? mag : body).push(src[t], src[t + 1], src[t + 2]);
+  }
+  // Too few triangles means the search found a trigger guard or a sling loop,
+  // not a magazine; better no animation than animating the wrong part.
+  if (mag.length < 300 || body.length < 600) return null;
+
+  const nrm = geo.attributes.normal;
+  const uv = geo.attributes.uv;
+  const remap = new Map();
+  const p = [], n = [], t = [], idx = [];
+  for (const v of mag) {
+    let at = remap.get(v);
+    if (at === undefined) {
+      at = p.length / 3;
+      remap.set(v, at);
+      p.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+      if (nrm) n.push(nrm.getX(v), nrm.getY(v), nrm.getZ(v));
+      if (uv) t.push(uv.getX(v), uv.getY(v));
+    }
+    idx.push(at);
+  }
+  const centre = new THREE.Vector3();
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  for (let i = 0; i < p.length; i += 3) {
+    min.x = Math.min(min.x, p[i]); max.x = Math.max(max.x, p[i]);
+    min.y = Math.min(min.y, p[i + 1]); max.y = Math.max(max.y, p[i + 1]);
+    min.z = Math.min(min.z, p[i + 2]); max.z = Math.max(max.z, p[i + 2]);
+  }
+  centre.addVectors(min, max).multiplyScalar(0.5);
+  for (let i = 0; i < p.length; i += 3) {
+    p[i] -= centre.x; p[i + 1] -= centre.y; p[i + 2] -= centre.z;
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+  if (nrm) out.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+  if (uv) out.setAttribute('uv', new THREE.Float32BufferAttribute(t, 2));
+  out.setIndex(idx);
+  out.computeBoundingBox();
+  out.computeBoundingSphere();
+
+  geo.setIndex(body);
+  geo.computeBoundingSphere();
+
+  return { geometry: out, at: centre, height: max.y - min.y };
 }
 
 /** Deletes every triangle inside a cylinder running down the sight line. */

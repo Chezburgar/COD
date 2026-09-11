@@ -172,8 +172,10 @@ export class LocalPlayer {
 
     /* ── scope ───────────────────────────────────────────────────── */
     const scoped = !!w.scope && c.adsAmount > 0.5;
-    const scopeTarget = w.scope ? clamp01((c.adsAmount - 0.55) / 0.35) : 0;
-    this.scopeBlend = damp(this.scopeBlend, scopeTarget, 22, dt);
+    // The glass comes up early in the aim and lands well before the pose
+    // finishes settling — waiting for it is the slowest thing about a scope.
+    const scopeTarget = w.scope ? clamp01((c.adsAmount - 0.3) / 0.3) : 0;
+    this.scopeBlend = damp(this.scopeBlend, scopeTarget, 34, dt);
     if (this.scopeBlend > 0.002 && w.scope) {
       // Magnification is defined against the *base* FOV, not the current one.
       const scopeFov = (2 * Math.atan(Math.tan((baseFov * Math.PI) / 360) / w.scope.zoom) * 180) / Math.PI;

@@ -571,6 +571,14 @@ function packModel(kind, asset) {
     mesh.frustumCulled = false;
     proto.add(mesh);
 
+    if (asset.magazine) {
+      const mag = new THREE.Mesh(asset.magazine.geometry, asset.magazine.material ?? asset.material);
+      mag.name = 'magazine';
+      mag.position.copy(asset.magazine.at);
+      mag.frustumCulled = false;
+      proto.add(mag);
+    }
+
     const a = asset.anchors;
     const muzzle = a.muzzle.clone();
     if (kind === 'pistolSupp') {

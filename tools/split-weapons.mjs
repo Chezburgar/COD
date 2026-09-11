@@ -20,7 +20,7 @@ import path from 'node:path';
 
 const SRC = process.argv[2];
 const DST = process.argv[3] ?? 'src/assets/weapons.glb';
-const TARGET_TRIS = Number(process.argv[4] ?? 6000);
+const TARGET_TRIS = Number(process.argv[4] ?? 16000);
 
 await MeshoptSimplifier.ready;
 await MeshoptEncoder.ready;
@@ -63,8 +63,49 @@ for (let t = 0; t < IDX.length; t += 3) {
   if (!g) groups.set(r, (g = []));
   g.push(t);
 }
-const shells = [...groups.values()].sort((a, b) => b.length - a.length);
+let shells = [...groups.values()].sort((a, b) => b.length - a.length);
 console.log(`${shells.length} shells, ${IDX.length / 3} triangles total`);
+
+/* Small loose parts — a rail, a charging handle, a cleaning rod — come through
+   as shells of their own. Each belongs to whichever weapon encloses it, so
+   they are folded back in rather than dropped on the floor. */
+const boundsOf = (tris) => {
+  const min = [1e9, 1e9, 1e9], max = [-1e9, -1e9, -1e9];
+  for (const t of tris) {
+    for (let k = 0; k < 3; k++) {
+      const v = IDX[t + k];
+      for (let a = 0; a < 3; a++) {
+        const c = POS[v * 3 + a];
+        if (c < min[a]) min[a] = c;
+        if (c > max[a]) max[a] = c;
+      }
+    }
+  }
+  return { min, max };
+};
+{
+  const big = shells.filter((s) => s.length >= 2000);
+  const small = shells.filter((s) => s.length < 2000);
+  const bounds = big.map(boundsOf);
+  for (const s of small) {
+    const b = boundsOf(s);
+    const mid = b.min.map((v, i) => (v + b.max[i]) / 2);
+    let best = -1, bestSlack = Infinity;
+    bounds.forEach((bb, i) => {
+      let slack = 0, inside = true;
+      for (let a = 0; a < 3; a++) {
+        const pad = 0.02;
+        if (mid[a] < bb.min[a] - pad || mid[a] > bb.max[a] + pad) inside = false;
+        slack += Math.max(0, bb.min[a] - mid[a]) + Math.max(0, mid[a] - bb.max[a]);
+      }
+      if (inside && slack < bestSlack) { bestSlack = slack; best = i; }
+    });
+    if (best >= 0) { big[best].push(...s); console.log(`  folded a ${s.length}-triangle part into shell ${best}`); }
+    else console.log(`  dropped a stray ${s.length}-triangle shell`);
+  }
+  shells = big;
+}
+console.log(`${shells.length} weapons after merging loose parts`);
 
 /* ── one node per shell, re-oriented ──────────────────────────────────── */
 const scene = root.listScenes()[0];
@@ -171,14 +212,25 @@ await doc.transform(
   prune({ keepAttributes: false }),
 );
 
+/* Texture budget by what each map is actually for: colour and relief carry the
+   detail you look at down the sights, so they stay full size, while the
+   metal-rough mask is a broad mask and halves without anyone noticing. */
+const SLOTS = [];
+for (const m of root.listMaterials()) {
+  SLOTS.push([m.getBaseColorTexture(), 'baseColor', 2048, 90]);
+  SLOTS.push([m.getNormalTexture(), 'normal', 2048, 92]);
+  SLOTS.push([m.getMetallicRoughnessTexture(), 'metalRough', 1024, 86]);
+}
 for (const texture of root.listTextures()) {
+  const slot = SLOTS.find(([t]) => t === texture);
+  const [, name, size, quality] = slot ?? [null, 'other', 1024, 88];
   const before = texture.getImage().byteLength;
   const buf = await sharp(Buffer.from(texture.getImage()))
-    .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: 86, effort: 6 })
+    .resize(size, size, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality, effort: 6 })
     .toBuffer();
   texture.setImage(new Uint8Array(buf)).setMimeType('image/webp');
-  console.log(`  texture: ${(before / 1e6).toFixed(2)} MB -> ${(buf.length / 1e6).toFixed(2)} MB`);
+  console.log(`  ${name}: ${(before / 1e6).toFixed(2)} MB -> ${(buf.length / 1e6).toFixed(2)} MB @ ${size}px q${quality}`);
 }
 
 // The source was Draco-compressed; the rebuilt primitives are not, so drop the

@@ -72,6 +72,9 @@ const PISTOLS = new Set(['pistol', 'pistolSupp', 'revolver']);
 
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _hand = new THREE.Vector3();
+const _leftTarget = new THREE.Vector3();
+const _e = new THREE.Euler();
 
 export class ViewModel {
   constructor(renderer, audio) {
@@ -178,8 +181,20 @@ export class ViewModel {
     // Pack weapons carry their own measured grips; the procedural fallbacks
     // and the knife and grenades use the table above.
     const grip = packWeapon(kind)?.grips ?? GRIPS[kind] ?? GRIPS.ar;
+    this.grips = grip;
+    this.armTune = ARM_TUNING[kind] ?? ARM_TUNING.default;
+    this.leftHand = null;
     this.arms.group.visible = true;
-    this.arms.gripWeapon({ right: grip.r, left: grip.l }, ARM_TUNING[kind] ?? ARM_TUNING.default);
+    this.arms.gripWeapon({ right: grip.r, left: grip.l }, this.armTune);
+  }
+
+  /** Puts the support hand somewhere other than its resting grip, or back. */
+  _moveLeftHand(target) {
+    if (!this.arms) return;
+    const at = target ?? this.grips?.l ?? null;
+    if (!at && !this.leftHand) return;
+    this.leftHand = target;
+    this.arms.gripWeapon({ right: this.grips.r, left: at }, this.armTune);
   }
 
   /* ── weapon swap ───────────────────────────────────────────────────────── */
@@ -195,6 +210,21 @@ export class ViewModel {
     this.boltNode = this.model.getObjectByName('bolt');
     this.magHome = this.magNode ? this.magNode.position.clone() : null;
     this.boltHome = this.boltNode ? this.boltNode.position.clone() : null;
+
+    // A spare copy of the magazine that lives in view space, so the one that
+    // comes out of the gun falls straight down while the weapon carries on
+    // moving, instead of hanging off the receiver.
+    if (this.magDrop) { this.renderer.vmScene.remove(this.magDrop.mesh); this.magDrop = null; }
+    if (this.magNode) {
+      const mesh = new THREE.Mesh(this.magNode.geometry, this.magNode.material);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      this.renderer.vmScene.add(mesh);
+      this.magDrop = { mesh, life: 0, vel: new THREE.Vector3(), spin: new THREE.Vector3() };
+      this.magNode.geometry.computeBoundingBox();
+      const b = this.magNode.geometry.boundingBox;
+      this.magSize = b.max.y - b.min.y;
+    } else this.magSize = 0.1;
 
     const hipKey = weapon.melee ? 'knife'
       : PISTOLS.has(weapon.model) ? 'pistol'
@@ -244,31 +274,100 @@ export class ViewModel {
     }));
   }
 
-  /** Mag-fed reload: tilt, drop the magazine, seat a fresh one, cycle if dry. */
+  /**
+   * Mag-fed reload, played out rather than mimed: the gun rolls inward, the
+   * support hand comes off the handguard and down to the magazine well, the
+   * spent magazine drops away and falls on its own, the hand goes out of frame
+   * for a fresh one and carries it back up into the well, and on an empty gun
+   * it slaps the bolt home before returning to the handguard.
+   */
   playReload(duration, empty) {
     const audio = this.audio;
-    let fired = { out: false, in: false, bolt: false };
+    const home = this.magHome;
+    // The hand holds the magazine at its body, a little below the well.
+    const well = home ? home.clone().add(_hand.set(0, -this.magSize * 0.12, 0)) : null;
+    const pouch = well ? well.clone().add(_hand.set(-0.06, -0.42, 0.07)) : null;
+    // A handgun is carried one-handed, so its support hand starts and finishes
+    // out of frame rather than on a handguard.
+    const rest = this.grips?.l ? new THREE.Vector3(...this.grips.l) : pouch;
+    const fired = { out: false, in: false, bolt: false };
+
     this.playSequence('reload', duration, (t, dt, wpos) => {
-      const tilt = Math.sin(clamp01(t * 1.35) * Math.PI) * 0.55;
-      const drop = t < 0.34 ? smoothstep(clamp01(t / 0.34)) : t < 0.6 ? 1 - smoothstep(clamp01((t - 0.34) / 0.26)) : 0;
-      if (this.magNode && this.magHome) {
-        this.magNode.position.set(this.magHome.x, this.magHome.y - drop * 0.34, this.magHome.z + drop * 0.06);
-        this.magNode.rotation.x = drop * 0.5;
-        this.magNode.visible = !(t > 0.3 && t < 0.42);
+      const roll = Math.sin(clamp01(t * 1.25) * Math.PI) * 0.6;
+
+      if (rest && well && pouch) {
+        // Where the support hand is, stage by stage.
+        let at;
+        if (t < 0.16) at = _hand.copy(rest).lerp(well, smoothstep(t / 0.16));
+        else if (t < 0.44) at = _hand.copy(well).lerp(pouch, smoothstep((t - 0.16) / 0.28));
+        else if (t < 0.64) at = _hand.copy(pouch).lerp(well, smoothstep((t - 0.44) / 0.2));
+        else if (t < 0.78) at = _hand.copy(well);
+        else at = _hand.copy(well).lerp(rest, smoothstep((t - 0.78) / 0.22));
+        this._moveLeftHand(_leftTarget.copy(at));
       }
-      if (!fired.out && t > 0.18) { fired.out = true; audio?.play('mag.out', { pos: wpos, volume: 0.55, ref: 2, max: 26 }); }
-      if (!fired.in && t > 0.56) { fired.in = true; audio?.play('mag.in', { pos: wpos, volume: 0.62, ref: 2, max: 26 }); }
+
+      if (this.magNode && home) {
+        if (t < 0.2) {
+          // Still seated, just rocking with the gun.
+          this.magNode.position.copy(home);
+          this.magNode.rotation.set(0, 0, 0);
+          this.magNode.visible = true;
+        } else if (t < 0.5) {
+          // Gone: the loose one in view space has it now.
+          this.magNode.visible = false;
+        } else {
+          // The fresh magazine rides up with the hand and seats.
+          const k = smoothstep(clamp01((t - 0.5) / 0.16));
+          this.magNode.visible = true;
+          this.magNode.position.set(
+            home.x - 0.03 * (1 - k),
+            home.y - this.magSize * 1.25 * (1 - k),
+            home.z + 0.01 * (1 - k));
+          this.magNode.rotation.x = -0.35 * (1 - k);
+        }
+      }
+
+      if (!fired.out && t > 0.18) {
+        fired.out = true;
+        this._dropMagazine();
+        audio?.play('mag.out', { pos: wpos, volume: 0.6, ref: 2, max: 26 });
+      }
+      if (!fired.in && t > 0.66) { fired.in = true; audio?.play('mag.in', { pos: wpos, volume: 0.66, ref: 2, max: 26 }); }
+      if (empty && !fired.bolt && t > 0.8) {
+        fired.bolt = true;
+        audio?.play('bolt.fwd', { pos: wpos, volume: 0.62, ref: 2, max: 26 });
+      }
       if (empty && this.boltNode && this.boltHome) {
-        const bt = clamp01((t - 0.72) / 0.2);
-        const pull = Math.sin(bt * Math.PI);
-        this.boltNode.position.z = this.boltHome.z + pull * 0.05;
-        if (!fired.bolt && bt > 0.5) { fired.bolt = true; audio?.play('bolt.fwd', { pos: wpos, volume: 0.6, ref: 2, max: 26 }); }
+        const bt = clamp01((t - 0.76) / 0.16);
+        this.boltNode.position.z = this.boltHome.z + Math.sin(bt * Math.PI) * 0.05;
       }
+
+      // A short, sharp jolt when the fresh magazine is seated and again when
+      // the bolt goes home — the two moments a reload is actually felt.
+      const seat = 0.9 * Math.exp(-Math.pow((t - 0.66) / 0.05, 2));
+      const slap = empty ? 0.7 * Math.exp(-Math.pow((t - 0.82) / 0.045, 2)) : 0;
+      // The weapon comes in toward the middle of the screen and rolls over so
+      // the magazine well faces the camera — a reload you can watch, rather
+      // than one that happens somewhere below the frame.
       return {
-        pos: new THREE.Vector3(-0.03 * tilt, -0.1 * tilt, 0.04 * tilt),
-        rot: new THREE.Vector3(0.34 * tilt, 0.5 * tilt, 0.7 * tilt),
+        pos: new THREE.Vector3(-0.062 * roll, -0.03 * roll - 0.012 * seat, 0.055 * roll + 0.02 * slap),
+        rot: new THREE.Vector3(0.2 * roll + 0.05 * seat, 0.46 * roll, 0.6 * roll - 0.04 * slap),
       };
     });
+  }
+
+  /** Hands the spent magazine to view space, where gravity has it. */
+  _dropMagazine() {
+    const d = this.magDrop;
+    if (!d || !this.magNode) return;
+    this.magNode.updateWorldMatrix(true, false);
+    d.mesh.position.setFromMatrixPosition(this.magNode.matrixWorld);
+    this.magNode.getWorldQuaternion(d.mesh.quaternion);
+    d.mesh.scale.setScalar(VM_SCALE);
+    d.mesh.visible = true;
+    d.life = 1.4;
+    d.vel.set(rand(-0.35, -0.05), rand(-0.3, 0.1), rand(0.1, 0.5));
+    d.spin.set(rand(-5, 5), rand(-5, 5), rand(-7, 7));
   }
 
   /** Single-shell top-up for the pump gun. */
@@ -476,6 +575,7 @@ export class ViewModel {
         this.seq = null;
         if (this.magNode && this.magHome) { this.magNode.position.copy(this.magHome); this.magNode.rotation.set(0, 0, 0); this.magNode.visible = true; }
         if (this.boltNode && this.boltHome) this.boltNode.position.copy(this.boltHome);
+        if (this.leftHand) this._moveLeftHand(null);
       }
     }
 
@@ -500,6 +600,17 @@ export class ViewModel {
     this.smoke.position.y += 0.05 + (this.t % 2) * 0.02;
     this.smoke.scale.setScalar(0.7 + this.heat * 0.8);
     this.smoke.rotation.z += dt * 0.4;
+
+    // ── the magazine that was just thrown away ──────────────────────────
+    const d = this.magDrop;
+    if (d && d.life > 0) {
+      d.life -= dt;
+      d.vel.y -= 7.5 * dt;
+      d.mesh.position.addScaledVector(d.vel, dt);
+      _e.set(d.spin.x * dt, d.spin.y * dt, d.spin.z * dt);
+      d.mesh.quaternion.multiply(_q.setFromEuler(_e));
+      if (d.life <= 0) d.mesh.visible = false;
+    }
 
     // ── shells ──────────────────────────────────────────────────────────
     for (const s of this.shells) {
@@ -526,6 +637,7 @@ export class ViewModel {
   }
 
   dispose() {
+    if (this.magDrop) { this.renderer.vmScene.remove(this.magDrop.mesh); this.magDrop = null; }
     if (this.model) this.rig.remove(this.model);
     if (this.arms) { this.rig.remove(this.arms.group); this.arms.dispose(); this.arms = null; }
   }
