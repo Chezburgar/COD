@@ -1,13 +1,13 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   MapBuilder — "Crossfire Yard".
+   MapBuilder — "Blacksand Depot".
 
-   An original three-lane team-deathmatch level built in the low-poly
-   industrial style of Asad.habib's "FPS low Poly Map" on Sketchfab, which the
-   player supplied as the art reference. Every brush here is authored from
-   scratch so collision, navigation and rendering all read from one source.
+   An original three-lane team-deathmatch level: a fuel depot the size a 5v5
+   match wants, laid out on a 2m grid in large readable shapes rather than
+   scattered clutter. Every brush is authored here, so collision, navigation
+   and rendering all read from one source.
 
-     north  ── warehouse ──────────────  interior fight, catwalk, roof
-     mid    ── plaza ────────────────────  open, raised centre platform
+     north  ── hangar ───────────────────  interior fight, mezzanine, big doors
+     mid    ── plaza ────────────────────  the control building, held or pushed
      south  ── container yard ───────────  tight corridors, stacked tops
 
    The layout is symmetric under a 180° rotation about the origin, so neither
@@ -19,8 +19,11 @@ import { CollisionWorld } from './Collision.js';
 import { tex, texNormal, texRough } from './Textures.js';
 import { mulberry32, lerp, clamp01 } from '../core/MathUtils.js';
 
-export const MAP_NAME = 'Crossfire Yard';
-export const MAP_BOUNDS = { minX: -42, maxX: 42, minZ: -32, maxZ: 32 };
+export const MAP_NAME = 'Blacksand Depot';
+export const MAP_BOUNDS = { minX: -58, maxX: 58, minZ: -44, maxZ: 44 };
+
+/** Where the two service alleys cross the lanes, north to south. */
+const CROSS = 22;
 
 /* Surface look-up: texture, tint, world-space texture scale, PBR values. */
 const MATS = {
@@ -32,10 +35,10 @@ const MATS = {
   grate:     { t: 'grid',      c: 0x8d959d, s: 0.5,  r: 0.62, m: 0.45 },
   wood:      { t: 'wood',      c: 0xbb8f5c, s: 0.35, r: 0.88, m: 0.0 },
   sandbag:   { t: 'sandbag',   c: 0xa2946f, s: 0.3,  r: 0.98, m: 0.0 },
-  crateRed:  { t: 'container', c: 0x8f4032, s: 0.16, r: 0.68, m: 0.16 },
-  crateBlue: { t: 'container', c: 0x2c5a72, s: 0.16, r: 0.68, m: 0.16 },
-  crateGreen:{ t: 'container', c: 0x46663e, s: 0.16, r: 0.68, m: 0.16 },
-  crateYell: { t: 'container', c: 0x9c7830, s: 0.16, r: 0.68, m: 0.16 },
+  crateRed:  { t: 'container', c: 0x7e4436, s: 0.16, r: 0.68, m: 0.16 },
+  crateBlue: { t: 'container', c: 0x35566a, s: 0.16, r: 0.68, m: 0.16 },
+  crateGreen:{ t: 'container', c: 0x475c44, s: 0.16, r: 0.68, m: 0.16 },
+  crateYell: { t: 'container', c: 0x94773c, s: 0.16, r: 0.68, m: 0.16 },
   crateGrey: { t: 'container', c: 0x6b6e71, s: 0.16, r: 0.68, m: 0.16 },
   roof:      { t: 'metal',     c: 0x646a71, s: 0.2,  r: 0.74, m: 0.3 },
   darkmetal: { t: 'metal',     c: 0x555c63, s: 0.3,  r: 0.62, m: 0.5 },
@@ -186,7 +189,10 @@ export function buildMap() {
     const max = new THREE.Vector3(Math.max(x0, x1), Math.max(y0, y1), Math.max(z0, z1));
     collision.add(
       [min.x, min.y, min.z], [max.x, max.y, max.z], PHYS[matKey] ?? 'concrete',
-      { ramp: opts.ramp ?? null, solid: opts.solid !== false, noShoot: opts.noShoot });
+      {
+        ramp: opts.ramp ?? null, solid: opts.solid !== false,
+        noShoot: opts.noShoot, stand: opts.stand,
+      });
     batch.box(min, max, matKey, { ...opts, tint: opts.tint ?? (0.86 + rng() * 0.2) });
   };
 
@@ -200,346 +206,413 @@ export function buildMap() {
 
   const cover = (x, z, dirX, dirZ) => coverPoints.push({ x, z, dx: dirX, dz: dirZ });
 
+  /** A practical light. Indoors there is no sun and no bounce, so the few
+      rooms in the depot carry their own. */
+  const lamp = (x, y, z, intensity, distance) => {
+    const l = new THREE.PointLight(0xffe4bc, intensity, distance, 2);
+    l.position.set(x, y, z);
+    group.add(l);
+    lights.push(l.position.clone());
+  };
+
   const { minX, maxX, minZ, maxZ } = MAP_BOUNDS;
 
   /* ── ground ───────────────────────────────────────────────────────────── */
   solid(minX, -2, minZ, maxX, 0, maxZ, 'sand', { faces: { bottom: false }, aoBase: -99 });
-  // Asphalt roadway down the middle lane and the two connecting alleys.
-  deco(minX + 1, 0.01, -9, maxX - 1, 0.02, 9, 'asphalt', { aoBase: -99 });
-  deco(-27, 0.02, minZ + 1, -21, 0.03, maxZ - 1, 'asphalt', { aoBase: -99 });
-  deco(21, 0.02, minZ + 1, 27, 0.03, maxZ - 1, 'asphalt', { aoBase: -99 });
+  // Roadways. One runs the length of the depot through the middle; two service
+  // alleys cross it, and every route between the three lanes uses one of them.
+  deco(minX + 1, 0.01, -11, maxX - 1, 0.02, 11, 'asphalt', { aoBase: -99 });
+  for (const ax of [-CROSS, CROSS]) {
+    deco(ax - 4.5, 0.02, minZ + 1, ax + 4.5, 0.03, maxZ - 1, 'asphalt', { aoBase: -99 });
+  }
+  // Painted bay markings out in the open, so the ground is never blank.
+  for (let x = -40; x <= 40; x += 10) {
+    deco(x - 0.12, 0.03, 24, x + 0.12, 0.04, 38, 'concrete', { aoBase: -99, tint: 1.25 });
+  }
 
   /* ── perimeter ────────────────────────────────────────────────────────── */
-  const W = 1.2, H = 9;
+  const W = 1.4, H = 11;
   solid(minX - W, 0, minZ - W, minX, H, maxZ + W, 'concrete');
   solid(maxX, 0, minZ - W, maxX + W, H, maxZ + W, 'concrete');
   solid(minX - W, 0, minZ - W, maxX + W, H, minZ, 'concrete');
   solid(minX - W, 0, maxZ, maxX + W, H, maxZ + W, 'concrete');
-  // Buttresses for silhouette.
-  for (let z = minZ + 4; z < maxZ; z += 8) {
-    deco(minX - 0.1, 0, z - 0.5, minX + 0.7, 7, z + 0.5, 'concrete');
-    deco(maxX - 0.7, 0, z - 0.5, maxX + 0.1, 7, z + 0.5, 'concrete');
+  for (let z = minZ + 5; z < maxZ; z += 10) {
+    deco(minX - 0.1, 0, z - 0.6, minX + 0.9, 8.5, z + 0.6, 'concrete');
+    deco(maxX - 0.9, 0, z - 0.6, maxX + 0.1, 8.5, z + 0.6, 'concrete');
+  }
+  for (let x = minX + 5; x < maxX; x += 10) {
+    deco(x - 0.6, 0, minZ - 0.1, x + 0.6, 8.5, minZ + 0.9, 'concrete');
+    deco(x - 0.6, 0, maxZ - 0.9, x + 0.6, 8.5, maxZ + 0.1, 'concrete');
   }
 
-  /* ══ NORTH LANE — warehouse ═══════════════════════════════════════════ */
-  const wh = { x0: -19, x1: 19, z0: -30, z1: -13, h: 7.2, t: 0.7 };
+  /* ══ NORTH LANE — the hangar ══════════════════════════════════════════ */
+  const hg = { x0: -26, x1: 26, z0: -40, z1: -22, h: 9.4, t: 0.8, mez: 4.4 };
   indoorVolumes.push(new THREE.Box3(
-    new THREE.Vector3(wh.x0, 0, wh.z0), new THREE.Vector3(wh.x1, wh.h, wh.z1)));
+    new THREE.Vector3(hg.x0, 0, hg.z0), new THREE.Vector3(hg.x1, hg.h, hg.z1)));
 
-  // North wall, solid, with a window band.
-  solid(wh.x0, 0, wh.z0, wh.x1, 3.2, wh.z0 + wh.t, 'plaster');
-  solid(wh.x0, 5.0, wh.z0, wh.x1, wh.h, wh.z0 + wh.t, 'plaster');
-  for (let x = wh.x0 + 2; x < wh.x1 - 1; x += 4.5) {           // window mullions
-    solid(x, 3.2, wh.z0, x + 0.5, 5.0, wh.z0 + wh.t, 'plaster');
+  // Back wall, with a band of clerestory windows so the inside is not a cave.
+  solid(hg.x0, 0, hg.z0, hg.x1, 5.4, hg.z0 + hg.t, 'plaster');
+  solid(hg.x0, 7.4, hg.z0, hg.x1, hg.h, hg.z0 + hg.t, 'plaster');
+  for (let x = hg.x0 + 3; x < hg.x1 - 2; x += 6) {
+    solid(x, 5.4, hg.z0, x + 0.6, 7.4, hg.z0 + hg.t, 'plaster');
   }
-  // South wall with three openings.
-  const southGaps = [[-13, -8.5], [-2.2, 2.2], [8.5, 13]];
-  let cx = wh.x0;
-  for (const [g0, g1] of southGaps) {
-    solid(cx, 0, wh.z1 - wh.t, g0, wh.h, wh.z1, 'plaster');
-    solid(g0, 4.6, wh.z1 - wh.t, g1, wh.h, wh.z1, 'plaster');   // lintel
-    cx = g1;
+  // Front wall, facing the plaza: three wide openings under deep lintels.
+  const frontGaps = [[-21, -14], [-3.5, 3.5], [14, 21]];
+  let fx = hg.x0;
+  for (const [g0, g1] of frontGaps) {
+    solid(fx, 0, hg.z1 - hg.t, g0, hg.h, hg.z1, 'plaster');
+    solid(g0, 5.2, hg.z1 - hg.t, g1, hg.h, hg.z1, 'plaster');
+    fx = g1;
   }
-  solid(cx, 0, wh.z1 - wh.t, wh.x1, wh.h, wh.z1, 'plaster');
-  // Side walls with one doorway each.
-  for (const sx of [wh.x0, wh.x1 - wh.t]) {
-    solid(sx, 0, wh.z0, sx + wh.t, wh.h, -24.5, 'plaster');
-    solid(sx, 4.6, -24.5, sx + wh.t, wh.h, -20.5, 'plaster');
-    solid(sx, 0, -20.5, sx + wh.t, wh.h, wh.z1, 'plaster');
+  solid(fx, 0, hg.z1 - hg.t, hg.x1, hg.h, hg.z1, 'plaster');
+  // End walls, each with a rolling door big enough to drive through.
+  for (const sx of [hg.x0, hg.x1 - hg.t]) {
+    solid(sx, 0, hg.z0, sx + hg.t, hg.h, -35, 'plaster');
+    solid(sx, 6.2, -35, sx + hg.t, hg.h, -28, 'plaster');
+    solid(sx, 0, -28, sx + hg.t, hg.h, hg.z1, 'plaster');
+    // Door rail and hanging slats above the opening.
+    deco(sx - 0.15, 6.2, -35, sx + hg.t + 0.15, 6.5, -28, 'darkmetal');
   }
-  // Roof slab (walkable) + parapet, with a gap at each end where the external
-  // stair ramps arrive.
-  const ROOF = wh.h + 0.5;
-  const gapZ0 = wh.z0 + 0.2, gapZ1 = wh.z0 + 3.2;
-  solid(wh.x0, wh.h, wh.z0, wh.x1, ROOF, wh.z1, 'roof');
-  for (const [a, b, c, d] of [
-    [wh.x0, wh.z0, wh.x1, wh.z0 + 0.35], [wh.x0, wh.z1 - 0.35, wh.x1, wh.z1],
-  ]) solid(a, ROOF, b, c, ROOF + 0.9, d, 'concrete');
-  for (const px of [wh.x0, wh.x1 - 0.35]) {
-    solid(px, ROOF, gapZ1, px + 0.35, ROOF + 0.9, wh.z1, 'concrete');
+  // Roof: a shallow double pitch, read from outside only.
+  // Solid, but flagged so navigation never treats it as a floor: nothing can
+  // reach it, and a thousand unreachable nodes up there is pure waste.
+  solid(hg.x0, hg.h, hg.z0, hg.x1, hg.h + 1.6, -31, 'roof',
+    { ramp: { axis: 'z', dir: 1 }, stand: false });
+  solid(hg.x0, hg.h, -31, hg.x1, hg.h + 1.6, hg.z1, 'roof',
+    { ramp: { axis: 'z', dir: -1 }, stand: false });
+  for (let x = hg.x0 + 4; x < hg.x1 - 2; x += 8) {
+    deco(x - 0.25, hg.h - 0.2, hg.z0, x + 0.25, hg.h + 1.5, hg.z1, 'darkmetal');
   }
-  // Ramps up the outside of each end wall.
-  solid(wh.x0 - 12, 0, gapZ0, wh.x0, ROOF, gapZ1, 'grate', { ramp: { axis: 'x', dir: 1 } });
-  solid(wh.x1, 0, gapZ0, wh.x1 + 12, ROOF, gapZ1, 'grate', { ramp: { axis: 'x', dir: -1 } });
-  for (const [rx0, rx1, dir] of [[wh.x0 - 12, wh.x0, 1], [wh.x1, wh.x1 + 12, -1]]) {
-    // Handrail along the open side of each flight: posts plus short sloped
-    // segments that follow the ramp rather than one bar floating over it.
-    const yAt = (x) => (dir > 0 ? (x - rx0) / 12 : (rx1 - x) / 12) * ROOF;
-    for (let x = rx0 + 0.4; x < rx1; x += 1.6) {
-      deco(x - 0.06, yAt(x), gapZ1 - 0.14, x + 0.06, yAt(x) + 1.02, gapZ1, 'darkmetal');
-      const x2 = Math.min(x + 1.6, rx1);
-      const lo = Math.min(yAt(x), yAt(x2)) + 0.92;
-      const hi = Math.max(yAt(x), yAt(x2)) + 1.02;
-      deco(x, lo, gapZ1 - 0.13, x2, hi, gapZ1 - 0.01, 'darkmetal', { ramp: { axis: 'x', dir } });
-    }
+  // Floor slab and roof trusses.
+  deco(hg.x0 + 1, 0.02, hg.z0 + 1, hg.x1 - 1, 0.03, hg.z1 - 1, 'concrete', { aoBase: -99, tint: 0.88 });
+  for (const px of [-17, -6, 6, 17]) {
+    solid(px - 0.5, 0, -31.5, px + 0.5, hg.h, -30.5, 'concrete');
+    cover(px, -29.8, 0, 1);
+    cover(px, -32.2, 0, -1);
   }
-  cover(wh.x0 - 6, gapZ1 + 1.2, 0, 1);
-  cover(wh.x1 + 6, gapZ1 + 1.2, 0, 1);
-  // Roof furniture: vents and an AC unit, doubles as cover up top.
-  solid(-8, wh.h + 0.5, -26, -4.5, wh.h + 2.1, -22.5, 'darkmetal'); cover(-6, -21.5, 0, 1);
-  solid(5, wh.h + 0.5, -20, 8.5, wh.h + 1.7, -17, 'darkmetal');     cover(6.7, -16, 0, 1);
-  for (let i = 0; i < 5; i++) deco(-14 + i * 6, wh.h + 0.5, -28.6, -12.6 + i * 6, wh.h + 1.5, -27.2, 'metal');
 
-  // Interior floor markings + support columns.
-  deco(wh.x0 + 1, 0.02, wh.z0 + 1, wh.x1 - 1, 0.03, wh.z1 - 1, 'concrete', { aoBase: -99, tint: 0.86 });
-  for (const px of [-11, 0, 11]) {
-    for (const pz of [-26, -18]) {
-      solid(px - 0.45, 0, pz - 0.45, px + 0.45, wh.h, pz + 0.45, 'concrete');
-      cover(px, pz + 1.2, 0, 1);
-    }
+  // Mezzanine along the back wall, reached by a flight at each end. The
+  // landing sits at exactly walkway height and overlaps it, so the two join
+  // without a slab hanging over the top step.
+  solid(hg.x0 + hg.t, hg.mez - 0.25, hg.z0 + hg.t, hg.x1 - hg.t, hg.mez, -34, 'grate');
+  for (let x = hg.x0 + 1.5; x < hg.x1 - 1; x += 2.6) {
+    deco(x, hg.mez, -34.2, x + 0.16, hg.mez + 1.15, -34.02, 'darkmetal');
   }
-  // Catwalk along the north wall, with a ramp up from the west end.
-  solid(wh.x0 + 0.7, 3.9, wh.z0 + 0.7, wh.x1 - 0.7, 4.1, wh.z0 + 4.2, 'grate');
-  for (let x = wh.x0 + 1; x < wh.x1 - 1; x += 2.4) {           // railing
-    deco(x, 4.1, wh.z0 + 4.0, x + 0.14, 5.2, wh.z0 + 4.2, 'darkmetal');
-  }
-  deco(wh.x0 + 0.7, 5.05, wh.z0 + 4.0, wh.x1 - 0.7, 5.2, wh.z0 + 4.2, 'darkmetal');
-  // Stairs up to the catwalk. Each gets a flat landing at exactly catwalk
-  // height that overlaps the walkway, so there is never a slab hanging low
-  // over the top of the ramp — that pinch is what makes a route unwalkable.
-  for (const [lx0, lx1] of [[wh.x0 + 0.7, wh.x0 + 4.4], [wh.x1 - 4.4, wh.x1 - 0.7]]) {
-    solid(lx0, 3.9, wh.z0 + 3.0, lx1, 4.1, wh.z0 + 5.6, 'grate');
-    solid(lx0, 0, wh.z0 + 5.6, lx1, 4.1, wh.z0 + 12.6, 'grate', { ramp: { axis: 'z', dir: -1 } });
-    for (let z = wh.z0 + 5.8; z < wh.z0 + 12.4; z += 1.6) {
-      const y = 4.1 * (1 - (z - (wh.z0 + 5.6)) / 7);
-      for (const rx of [lx0, lx1 - 0.12]) {
-        deco(rx, y, z - 0.06, rx + 0.12, y + 1.0, z + 0.06, 'darkmetal');
+  deco(hg.x0 + hg.t, hg.mez + 1.0, -34.22, hg.x1 - hg.t, hg.mez + 1.15, -34.0, 'darkmetal');
+  for (const [lx0, lx1] of [[hg.x0 + hg.t, hg.x0 + 5], [hg.x1 - 5, hg.x1 - hg.t]]) {
+    solid(lx0, hg.mez - 0.25, -34, lx1, hg.mez, -31.4, 'grate');
+    solid(lx0, 0, -31.4, lx1, hg.mez, -24.4, 'grate', { ramp: { axis: 'z', dir: -1 } });
+    for (let z = -31.2; z < -24.8; z += 1.6) {
+      const y = hg.mez * (1 - (z + 31.4) / 7);
+      for (const rx of [lx0, lx1 - 0.14]) {
+        deco(rx, y, z - 0.07, rx + 0.14, y + 1.05, z + 0.07, 'darkmetal');
       }
     }
+    cover((lx0 + lx1) / 2, -24, 0, 1);
   }
 
-  // Interior crates.
+  for (const lx of [-17, 0, 17]) lamp(lx, 7.6, -31, 34, 34);
+  lamp(0, 7.8, -24.5, 20, 24);
+
+  // Crates and a work bay to fight around on the hangar floor.
   const crateColors = ['crateRed', 'crateBlue', 'crateGreen', 'crateYell'];
   const stack = (x, z, w, d, levels, base = 0) => {
     for (let i = 0; i < levels; i++) {
-      const s = 1 - i * 0.12;
-      solid(x - (w * s) / 2, base + i * 1.25, z - (d * s) / 2,
-        x + (w * s) / 2, base + (i + 1) * 1.25, z + (d * s) / 2,
-        crateColors[(rng() * 4) | 0], { tint: 0.9 + rng() * 0.2 });
+      const s = 1 - i * 0.1;
+      solid(x - (w * s) / 2, base + i * 1.3, z - (d * s) / 2,
+        x + (w * s) / 2, base + (i + 1) * 1.3, z + (d * s) / 2,
+        crateColors[(rng() * 4) | 0], { tint: 0.88 + rng() * 0.24 });
     }
-    cover(x, z + d / 2 + 0.6, 0, 1);
-    cover(x, z - d / 2 - 0.6, 0, -1);
+    cover(x, z + d / 2 + 0.7, 0, 1);
+    cover(x, z - d / 2 - 0.7, 0, -1);
   };
-  stack(-15, -17, 2.6, 2.6, 2); stack(-6.5, -21, 2.4, 2.4, 3);
-  stack(3, -16.5, 2.8, 2.8, 2); stack(14.5, -19, 2.6, 2.6, 3);
-  stack(9, -27, 2.4, 2.4, 2);  stack(-12, -27.5, 2.6, 2.6, 1);
+  stack(-21, -26, 2.8, 2.8, 2); stack(-11.5, -27.5, 2.6, 2.6, 3);
+  stack(0, -25, 3.0, 3.0, 2);   stack(11.5, -27.5, 2.6, 2.6, 3);
+  stack(21, -26, 2.8, 2.8, 2);  stack(-6, -37, 2.6, 2.6, 1);
+  stack(6, -37, 2.6, 2.6, 1);
 
-  /* ══ SOUTH LANE — container yard ══════════════════════════════════════ */
+  /* ══ MID LANE — the control building ══════════════════════════════════ */
+  // The one piece of the depot both teams want: two floors in the middle of
+  // the plaza, open enough to be pushed and windowed enough to be held.
+  const cb = { x0: -11, x1: 11, z0: -9, z1: 9, t: 0.6, floor: 4.4, top: 8.2 };
+  indoorVolumes.push(new THREE.Box3(
+    new THREE.Vector3(cb.x0, 0, cb.z0), new THREE.Vector3(cb.x1, cb.top, cb.z1)));
+
+  /** One wall of the building, with a doorway punched through the middle. */
+  const wallWithDoor = (x0, y0, z0, x1, y1, z1, along, gap, lintel) => {
+    const [a0, a1] = along === 'x' ? [x0, x1] : [z0, z1];
+    const mid = (a0 + a1) / 2;
+    const g0 = mid - gap / 2, g1 = mid + gap / 2;
+    if (along === 'x') {
+      solid(x0, y0, z0, g0, y1, z1, 'plaster');
+      solid(g0, lintel, z0, g1, y1, z1, 'plaster');
+      solid(g1, y0, z0, x1, y1, z1, 'plaster');
+    } else {
+      solid(x0, y0, z0, x1, y1, g0, 'plaster');
+      solid(x0, lintel, g0, x1, y1, g1, 'plaster');
+      solid(x0, y0, g1, x1, y1, z1, 'plaster');
+    }
+  };
+  // Ground floor: doorways north, south and west. The east bay is the
+  // stairwell, so that wall stays closed.
+  wallWithDoor(cb.x0, 0, cb.z0, cb.x1, cb.floor, cb.z0 + cb.t, 'x', 4, 3.2);
+  wallWithDoor(cb.x0, 0, cb.z1 - cb.t, cb.x1, cb.floor, cb.z1, 'x', 4, 3.2);
+  wallWithDoor(cb.x0, 0, cb.z0, cb.x0 + cb.t, cb.floor, cb.z1, 'z', 4, 3.2);
+  solid(cb.x1 - cb.t, 0, cb.z0, cb.x1, cb.floor, cb.z1, 'plaster');
+
+  // First floor slab, with the east bay left open for the stair.
+  const STAIR = { x0: 5.5, x1: cb.x1 - cb.t, top: -7, bottom: 8.4 };
+  solid(cb.x0, cb.floor - 0.4, cb.z0, STAIR.x0, cb.floor, cb.z1, 'concrete');
+  solid(STAIR.x0, cb.floor - 0.4, cb.z0, cb.x1, cb.floor, STAIR.top, 'concrete');
+  // One long flight up the east bay — short enough stairs are unwalkable, and
+  // a flight that steep is worse than no stair at all.
+  solid(STAIR.x0, 0, STAIR.top, STAIR.x1, cb.floor, STAIR.bottom, 'concrete',
+    { ramp: { axis: 'z', dir: -1 } });
+  for (let z = STAIR.top + 0.6; z < STAIR.bottom; z += 1.6) {
+    const y = cb.floor * (1 - (z - STAIR.top) / (STAIR.bottom - STAIR.top));
+    deco(STAIR.x0, y, z - 0.07, STAIR.x0 + 0.14, y + 1.05, z + 0.07, 'darkmetal');
+  }
+
+  // Upper floor: window bands on all four sides instead of solid walls, with a
+  // full-height doorway in the west band where the outside stair lands.
+  const band = (x0, z0, x1, z1) => {
+    solid(x0, cb.floor, z0, x1, cb.floor + 1.0, z1, 'plaster');
+    solid(x0, cb.floor + 2.3, z0, x1, cb.top, z1, 'plaster');
+  };
+  band(cb.x0, cb.z0, cb.x1, cb.z0 + cb.t);
+  band(cb.x0, cb.z1 - cb.t, cb.x1, cb.z1);
+  band(cb.x1 - cb.t, cb.z0, cb.x1, cb.z1);
+  const DOOR = [-3.4, -0.6];
+  solid(cb.x0, cb.floor, cb.z0, cb.x0 + cb.t, cb.floor + 1.0, DOOR[0], 'plaster');
+  solid(cb.x0, cb.floor, DOOR[1], cb.x0 + cb.t, cb.floor + 1.0, cb.z1, 'plaster');
+  solid(cb.x0, cb.floor + 2.3, cb.z0, cb.x0 + cb.t, cb.top, cb.z1, 'plaster');
+  for (let x = cb.x0 + 3.5; x < cb.x1 - 2; x += 3.5) {   // mullions
+    solid(x, cb.floor + 1.0, cb.z0, x + 0.4, cb.floor + 2.3, cb.z0 + cb.t, 'plaster');
+    solid(x, cb.floor + 1.0, cb.z1 - cb.t, x + 0.4, cb.floor + 2.3, cb.z1, 'plaster');
+  }
+  for (let z = cb.z0 + 3.5; z < cb.z1 - 2; z += 3.5) {
+    solid(cb.x1 - cb.t, cb.floor + 1.0, z, cb.x1, cb.floor + 2.3, z + 0.4, 'plaster');
+  }
+  solid(cb.x0 - 0.4, cb.top, cb.z0 - 0.4, cb.x1 + 0.4, cb.top + 0.5, cb.z1 + 0.4, 'roof',
+    { stand: false });
+  cover(cb.x0 + 2, cb.z0 + 1.4, 0, 1);
+  cover(cb.x1 - 2, cb.z1 - 1.4, 0, -1);
+
+  lamp(0, 3.7, 0, 22, 24);
+  lamp(-5, 7.5, -4, 18, 22);
+  lamp(5, 7.5, 4, 18, 22);
+
+  // Outside stair to the upper floor, so it can be taken from the plaza too,
+  // landing on a balcony that runs to the west doorway.
+  solid(cb.x0 - 4.6, cb.floor - 0.3, -5.2, cb.x0, cb.floor, 1.0, 'grate');
+  solid(cb.x0 - 4.6, 0, 1.0, cb.x0, cb.floor, 8.6, 'grate', { ramp: { axis: 'z', dir: -1 } });
+  for (let z = 1.2; z < 8.4; z += 1.5) {
+    const y = cb.floor * (1 - (z - 1.0) / 7.6);
+    deco(cb.x0 - 4.6, y, z - 0.07, cb.x0 - 4.46, y + 1.05, z + 0.07, 'darkmetal');
+  }
+  for (let z = -5.0; z < 0.9; z += 1.5) {
+    deco(cb.x0 - 4.6, cb.floor, z, cb.x0 - 4.46, cb.floor + 1.1, z + 0.14, 'darkmetal');
+  }
+  cover(cb.x0 - 2.3, -5.4, 0, -1);
+
+  /* ── plaza furniture ──────────────────────────────────────────────────── */
+  // Fuel tanks flanking the building: big, readable, and good to fight around.
+  const tank = (tx, tz) => {
+    solid(tx - 3.4, 0, tz - 3.4, tx + 3.4, 5.2, tz + 3.4, 'metal', { tint: 0.95 });
+    deco(tx - 3.7, 4.6, tz - 3.7, tx + 3.7, 5.5, tz + 3.7, 'darkmetal');
+    deco(tx - 3.7, 1.6, tz - 3.7, tx + 3.7, 1.9, tz + 3.7, 'darkmetal');
+    for (const sz of [-1, 1]) cover(tx, tz + sz * 4.1, 0, sz);
+  };
+  tank(-30, -6); tank(30, 6);
+
+  const truck = (tx, tz, flip) => {
+    solid(tx - 4.6, 0.4, tz - 1.3, tx + 4.6, 1.6, tz + 1.3, 'darkmetal');
+    solid(tx + flip * 2.9, 1.6, tz - 1.25, tx + flip * 4.7, 3.3, tz + 1.25, 'crateGrey');
+    for (const wx of [-3.4, -1.5, 3.3]) {
+      deco(tx + wx, 0, tz - 1.45, tx + wx + 0.8, 0.8, tz + 1.45, 'darkmetal', { tint: 0.5 });
+    }
+    solid(tx - 4.6, 1.6, tz - 1.3, tx + flip * 1.3, 2.8, tz - 1.05, 'metal');
+    cover(tx, tz + 2.0, 0, 1); cover(tx, tz - 2.0, 0, -1);
+  };
+  truck(-18, 12, -1); truck(18, -12, 1);
+
+  const barrier = (bx, bz, axis) => {
+    const hx = axis === 'x' ? 2.0 : 0.45, hz = axis === 'x' ? 0.45 : 2.0;
+    solid(bx - hx, 0, bz - hz, bx + hx, 1.1, bz + hz, 'concrete');
+    deco(bx - hx * 0.7, 1.1, bz - hz * 0.7, bx + hx * 0.7, 1.24, bz + hz * 0.7, 'concrete');
+    cover(bx, bz, axis === 'x' ? 0 : 1, axis === 'x' ? 1 : 0);
+  };
+  for (const [bx, bz, ax] of [
+    [-40, -4, 'z'], [-40, 4, 'z'], [40, -4, 'z'], [40, 4, 'z'],
+    [-CROSS, -14, 'x'], [CROSS, 14, 'x'], [-CROSS, 14, 'x'], [CROSS, -14, 'x'],
+    [-14, -13, 'x'], [14, 13, 'x'], [-6, 14, 'x'], [6, -14, 'x'],
+    [-34, 15, 'x'], [34, -15, 'x'],
+  ]) barrier(bx, bz, ax);
+
+  const sandbagNest = (sx, sz, face) => {
+    solid(sx - 2.0, 0, sz - 0.5, sx + 2.0, 1.05, sz + 0.5, 'sandbag');
+    solid(sx - 2.0, 0, sz - 0.5 - (face > 0 ? 0 : 1.6), sx - 1.5, 1.05,
+      sz + 0.5 + (face > 0 ? 1.6 : 0), 'sandbag');
+    cover(sx, sz - face * 1.0, 0, -face);
+  };
+  sandbagNest(-36, 20, 1); sandbagNest(36, -20, -1);
+  sandbagNest(-16, -15, -1); sandbagNest(16, 15, 1);
+
+  // Lane walls, so the middle never reads as one open field.
+  solid(-44, 0, -18.6, -30, 3.6, -17.4, 'concrete'); cover(-37, -16.6, 0, 1);
+  solid(30, 0, 17.4, 44, 3.6, 18.6, 'concrete');     cover(37, 16.6, 0, -1);
+  solid(-44, 0, 17.4, -30, 3.6, 18.6, 'concrete');
+  solid(30, 0, -18.6, 44, 3.6, -17.4, 'concrete');
+  solid(-12, 0, -18.6, 12, 3.6, -17.4, 'concrete', { faces: { top: false } });
+  solid(-12, 0, 17.4, 12, 3.6, 18.6, 'concrete', { faces: { top: false } });
+
+  /* ══ SOUTH LANE — the container yard ══════════════════════════════════ */
   const CH = 2.62, CW = 2.44;   // ISO container height / width
-  /** Places a container. `len` 6.06 (20ft) or 12.19 (40ft); `axis` its long axis. */
   const container = (x, y, z, len, axis, colorKey) => {
     const hx = axis === 'x' ? len / 2 : CW / 2;
     const hz = axis === 'x' ? CW / 2 : len / 2;
-    solid(x - hx, y, z - hz, x + hx, y + CH, z + hz, colorKey, { tint: 0.88 + rng() * 0.24 });
-    // Corner castings for silhouette.
+    solid(x - hx, y, z - hz, x + hx, y + CH, z + hz, colorKey, { tint: 0.86 + rng() * 0.26 });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       deco(x + sx * hx - sx * 0.3, y + CH, z + sz * hz - sz * 0.3,
         x + sx * hx, y + CH + 0.18, z + sz * hz, 'darkmetal');
     }
-    cover(x + (axis === 'x' ? 0 : hx + 0.7), z + (axis === 'x' ? hz + 0.7 : 0), axis === 'x' ? 0 : 1, axis === 'x' ? 1 : 0);
-    cover(x - (axis === 'x' ? 0 : hx + 0.7), z - (axis === 'x' ? hz + 0.7 : 0), axis === 'x' ? 0 : -1, axis === 'x' ? -1 : 0);
+    cover(x + (axis === 'x' ? 0 : hx + 0.8), z + (axis === 'x' ? hz + 0.8 : 0), axis === 'x' ? 0 : 1, axis === 'x' ? 1 : 0);
+    cover(x - (axis === 'x' ? 0 : hx + 0.8), z - (axis === 'x' ? hz + 0.8 : 0), axis === 'x' ? 0 : -1, axis === 'x' ? -1 : 0);
   };
-
   const CC = ['crateRed', 'crateBlue', 'crateGreen', 'crateYell', 'crateGrey'];
-  // Row 1 — a wall of containers with gaps to push through. The two single
-  // stacks at x = ±9 are the ones the ramps climb onto, so nothing sits above.
-  container(-24, 0, 14.5, 12.19, 'x', CC[0]);
-  container(-24, CH, 14.5, 12.19, 'x', CC[3]);
-  container(24, 0, 14.5, 12.19, 'x', CC[2]);
-  container(24, CH, 14.5, 12.19, 'x', CC[1]);
-  container(-9, 0, 14.5, 6.06, 'x', CC[1]);
-  container(9, 0, 14.5, 6.06, 'x', CC[2]);
-  container(0, 0, 14.5, 6.06, 'x', CC[4]);
-  container(0, CH, 14.5, 6.06, 'x', CC[3]);
-  // Row 2 — perpendicular, creating a grid of corridors.
-  container(-30, 0, 23, 12.19, 'z', CC[4]);
-  container(-16, 0, 22, 6.06, 'z', CC[2]);
-  container(-16, CH, 22, 6.06, 'z', CC[0]);
-  container(0, 0, 24, 12.19, 'z', CC[3]);
-  container(16, 0, 22, 6.06, 'z', CC[1]);
-  container(16, CH, 22, 6.06, 'z', CC[3]);
-  container(30, 0, 23, 12.19, 'z', CC[0]);
-  // Row 3 — back wall against the south perimeter.
-  container(-22, 0, 29.5, 12.19, 'x', CC[1]);
-  container(-6, 0, 29.5, 6.06, 'x', CC[4]);
-  container(8, 0, 29.5, 6.06, 'x', CC[0]);
-  container(22, 0, 29.5, 12.19, 'x', CC[3]);
 
-  // Pallet ramps onto the container tops, mirrored so both spawns get one.
+  // Front row: a broken wall of boxes with three ways through.
+  container(-38, 0, 23, 12.19, 'x', CC[0]);
+  container(-38, CH, 23, 12.19, 'x', CC[3]);
+  container(-20, 0, 23, 6.06, 'x', CC[1]);
+  container(0, 0, 23, 12.19, 'x', CC[4]);
+  container(0, CH, 23, 12.19, 'x', CC[2]);
+  container(20, 0, 23, 6.06, 'x', CC[2]);
+  container(38, 0, 23, 12.19, 'x', CC[1]);
+  container(38, CH, 23, 12.19, 'x', CC[0]);
+  // Second row, turned across the first to make a grid of alleys.
+  container(-45, 0, 32, 12.19, 'z', CC[4]);
+  container(-31, 0, 31, 6.06, 'z', CC[2]);
+  container(-31, CH, 31, 6.06, 'z', CC[0]);
+  // These two run back from the boxes the ramps climb, so their tops join into
+  // a walkway over the yard rather than a platform that goes nowhere.
+  container(-20, 0, 28, 12.19, 'z', CC[3]);
+  container(20, 0, 28, 12.19, 'z', CC[1]);
+  container(-8, 0, 34, 12.19, 'z', CC[1]);
+  container(8, 0, 34, 12.19, 'z', CC[3]);
+  container(31, 0, 31, 6.06, 'z', CC[1]);
+  container(31, CH, 31, 6.06, 'z', CC[3]);
+  container(45, 0, 32, 12.19, 'z', CC[0]);
+  // Back row against the wall.
+  container(-34, 0, 39.5, 12.19, 'x', CC[1]);
+  container(-16, 0, 39.5, 6.06, 'x', CC[4]);
+  container(2, 0, 39.5, 12.19, 'x', CC[0]);
+  container(20, 0, 39.5, 6.06, 'x', CC[3]);
+  container(36, 0, 39.5, 6.06, 'x', CC[2]);
+
+  // A stepped stack at each side climbs onto the container tops.
   for (const s of [-1, 1]) {
-    solid(s * 9 - 1.4, 0, 9.4, s * 9 + 1.4, CH, 13.3, 'wood', { ramp: { axis: 'z', dir: 1 } });
-    for (let z = 9.8; z < 13.2; z += 0.85) {
-      const y = ((z - 9.4) / 3.9) * CH;
-      deco(s * 9 - 1.5, y - 0.06, z - 0.06, s * 9 - 1.36, y + 0.9, z + 0.06, 'darkmetal');
-      deco(s * 9 + 1.36, y - 0.06, z - 0.06, s * 9 + 1.5, y + 0.9, z + 0.06, 'darkmetal');
+    // The climb tops out before the box and finishes on a short landing that
+    // laps over its edge: a ramp that arrives mid-air beside a platform reads
+    // as a step to a player and as a wall to everything else.
+    solid(s * 20 - 1.5, 0, 17.0, s * 20 + 1.5, CH, 21.0, 'wood', { ramp: { axis: 'z', dir: 1 } });
+    solid(s * 20 - 1.5, CH - 0.2, 21.0, s * 20 + 1.5, CH, 22.6, 'wood');
+    for (let z = 17.4; z < 20.9; z += 0.85) {
+      const y = ((z - 17.0) / 4.0) * CH;
+      deco(s * 20 - 1.6, y - 0.06, z - 0.06, s * 20 - 1.46, y + 0.95, z + 0.06, 'darkmetal');
+      deco(s * 20 + 1.46, y - 0.06, z - 0.06, s * 20 + 1.6, y + 0.95, z + 0.06, 'darkmetal');
     }
-    cover(s * 9, 8.6, 0, -1);
+    cover(s * 20, 16.2, 0, -1);
   }
-  // Gantry crane spanning the yard — visual anchor plus overhead cover.
-  for (const gx of [-13, 13]) {
-    solid(gx - 0.5, 0, 18.2, gx + 0.5, 10.5, 19.2, 'darkmetal');
-    deco(gx - 1.4, 0, 17.9, gx + 1.4, 0.6, 19.5, 'darkmetal');
+
+  // Gantry crane over the yard: the landmark you navigate the south lane by.
+  for (const gx of [-22, 22]) {
+    solid(gx - 0.6, 0, 27.4, gx + 0.6, 12.5, 28.6, 'darkmetal');
+    deco(gx - 1.6, 0, 27.0, gx + 1.6, 0.7, 29.0, 'darkmetal');
   }
-  deco(-14, 10.5, 17.9, 14, 11.6, 19.5, 'darkmetal');
-  for (let x = -13; x <= 13; x += 2.2) deco(x - 0.12, 9.4, 18.4, x + 0.12, 10.5, 19.0, 'darkmetal');
-  deco(-2.2, 8.6, 18.0, 2.2, 10.5, 19.4, 'crateYell');
-
-  /* ══ MID LANE — plaza ═════════════════════════════════════════════════ */
-  // Centre platform with ramps east and west.
-  solid(-6, 0, -5, 6, 2, 5, 'concrete');
-  solid(-10.4, 0, -3, -6, 2, 3, 'concrete', { ramp: { axis: 'x', dir: 1 } });
-  solid(6, 0, -3, 10.4, 2, 3, 'concrete', { ramp: { axis: 'x', dir: -1 } });
-  for (const sz of [-5, 5]) {                                   // low walls on the platform
-    solid(-6, 2, sz - (sz < 0 ? 0 : 0.4), 6, 3.05, sz + (sz < 0 ? 0.4 : 0), 'sandbag');
-    cover(0, sz + (sz < 0 ? 1 : -1), 0, sz < 0 ? -1 : 1);
-  }
-  deco(-6, 2.0, -5, 6, 2.03, 5, 'concrete', { aoBase: -99, tint: 0.9 });
-
-  // Two hard-points flanking the plaza (mirrored pair). Built wall-by-wall so
-  // the doorway and firing slit are real gaps rather than carved-out geometry.
-  const pillbox = (px, pz, facing) => {
-    const t = 0.5, h = 3.6, r = 3.4;
-    indoorVolumes.push(new THREE.Box3(
-      new THREE.Vector3(px - r, 0, pz - r), new THREE.Vector3(px + r, h, pz + r)));
-    // Solid side walls (running along X).
-    solid(px - r, 0, pz - r, px + r, h, pz - r + t, 'plaster');
-    solid(px - r, 0, pz + r - t, px + r, h, pz + r, 'plaster');
-    // Entry wall: two jambs and a lintel leave a doorway in the middle.
-    const inX = facing > 0 ? px + r - t : px - r;
-    solid(inX, 0, pz - r, inX + t, h, pz - 1.1, 'plaster');
-    solid(inX, 2.4, pz - 1.1, inX + t, h, pz + 1.1, 'plaster');
-    solid(inX, 0, pz + 1.1, inX + t, h, pz + r, 'plaster');
-    // Opposite wall: a horizontal firing slit at chest height.
-    const outX = facing > 0 ? px - r : px + r - t;
-    solid(outX, 0, pz - r, outX + t, 1.15, pz + r, 'plaster');
-    solid(outX, 1.95, pz - r, outX + t, h, pz + r, 'plaster');
-    solid(px - r, h, pz - r, px + r, h + 0.45, pz + r, 'roof');
-    cover(px + (facing > 0 ? -1.6 : 1.6), pz, -facing, 0);
-  };
-  pillbox(-23, -8, 1);
-  pillbox(23, 8, -1);
-
-  // Wrecked flatbed truck as centre-lane cover (mirrored).
-  const truck = (tx, tz, flip) => {
-    solid(tx - 4.2, 0.35, tz - 1.2, tx + 4.2, 1.5, tz + 1.2, 'darkmetal');       // bed
-    solid(tx + flip * 2.6, 1.5, tz - 1.15, tx + flip * 4.3, 3.1, tz + 1.15, 'crateGrey'); // cab
-    for (const wx of [-3.2, -1.4, 3.1]) {
-      deco(tx + wx * 1, 0, tz - 1.35, tx + wx + 0.7, 0.75, tz + 1.35, 'darkmetal', { tint: 0.5 });
-    }
-    solid(tx - 4.2, 1.5, tz - 1.2, tx + flip * 1.2, 2.6, tz - 0.95, 'metal');    // side rail
-    cover(tx, tz + 1.9, 0, 1); cover(tx, tz - 1.9, 0, -1);
-  };
-  truck(-15, 5.5, -1);
-  truck(15, -5.5, 1);
-
-  // Jersey barriers and sandbag nests scattered through the plaza.
-  const barrier = (bx, bz, axis) => {
-    const hx = axis === 'x' ? 1.9 : 0.4, hz = axis === 'x' ? 0.4 : 1.9;
-    solid(bx - hx, 0, bz - hz, bx + hx, 1.05, bz + hz, 'concrete');
-    deco(bx - hx * 0.7, 1.05, bz - hz * 0.7, bx + hx * 0.7, 1.18, bz + hz * 0.7, 'concrete');
-    cover(bx, bz, axis === 'x' ? 0 : 1, axis === 'x' ? 1 : 0);
-  };
-  for (const [bx, bz, ax] of [
-    [-30, -3, 'z'], [-30, 3, 'z'], [30, -3, 'z'], [30, 3, 'z'],
-    [-19, -2, 'x'], [19, 2, 'x'], [-9.5, 8, 'x'], [9.5, -8, 'x'],
-    [-2, -9.5, 'x'], [2, 9.5, 'x'],
-  ]) barrier(bx, bz, ax);
-
-  const sandbagNest = (sx, sz) => {
-    solid(sx - 1.7, 0, sz - 0.45, sx + 1.7, 1.0, sz + 0.45, 'sandbag');
-    solid(sx - 1.7, 0, sz - 1.5, sx - 1.25, 1.0, sz + 0.45, 'sandbag');
-    cover(sx, sz - 0.9, 0, -1);
-  };
-  sandbagNest(-27, 10); sandbagNest(27, -10);
-  sandbagNest(-11, -10.5); sandbagNest(11, 10.5);
-
-  // Lane-dividing walls that stop the plaza reading as one open field.
-  solid(-34, 0, -12.4, -21, 3.2, -11.6, 'concrete'); cover(-27, -10.8, 0, 1);
-  solid(21, 0, 11.6, 34, 3.2, 12.4, 'concrete');     cover(27, 10.8, 0, -1);
-  solid(-34, 0, 11.6, -21, 3.2, 12.4, 'concrete');
-  solid(21, 0, -12.4, 34, 3.2, -11.6, 'concrete');
+  deco(-23, 12.5, 27.0, 23, 13.8, 29.0, 'darkmetal');
+  for (let x = -22; x <= 22; x += 2.4) deco(x - 0.14, 11.2, 27.6, x + 0.14, 12.5, 28.4, 'darkmetal');
+  deco(-2.6, 10.0, 27.2, 2.6, 12.5, 28.8, 'crateYell');
 
   /* ══ SPAWN COMPOUNDS ═════════════════════════════════════════════════ */
-  const compound = (side) => {            // side -1 = Ghost (west), +1 = Viper (east)
-    const bx = side * 36;
-    // Low blast walls forming a protected pocket.
-    solid(bx - side * 3.2, 0, -7.4, bx - side * 2.6, 3.4, -3.2, 'concrete');
-    solid(bx - side * 3.2, 0, 3.2, bx - side * 2.6, 3.4, 7.4, 'concrete');
-    solid(bx - side * 3.2, 3.0, -3.2, bx - side * 2.6, 3.4, 3.2, 'concrete');
-    // Supply crates and a shade canopy.
-    solid(bx + side * 2, 0, -6.5, bx + side * 4, 1.6, -4.5, 'wood');
-    solid(bx + side * 2, 0, 4.5, bx + side * 4, 1.6, 6.5, 'crateGreen');
-    deco(bx - side * 2.2, 4.0, -6.5, bx + side * 4.5, 4.3, 6.5, 'metal', { tint: 0.95 });
-    for (const cz of [-6, 6]) deco(bx - side * 2.0, 0, cz - 0.15, bx - side * 1.8, 4.0, cz + 0.15, 'darkmetal');
-    // Stairs up to the perimeter catwalk that overlooks the lane. The landing
-    // sits at exactly catwalk height and overlaps it, so the two surfaces join
-    // cleanly instead of leaving a low slab over the top step.
-    solid(bx - side * 2.5, 3.2, -13.4, bx + side * 5.2, 3.5, -9.4, 'grate');
-    const sx0 = bx + side * 2.5, sx1 = bx + side * 5.8;
-    solid(Math.min(sx0, sx1), 3.2, -13.4, Math.max(sx0, sx1), 3.5, -9.4, 'grate');
-    solid(Math.min(sx0, sx1), 0, -9.4, Math.max(sx0, sx1), 3.5, -3.4, 'grate',
-      { ramp: { axis: 'z', dir: -1 } });
-    for (let z = -13.2; z < -9.6; z += 1.6) {
-      deco(bx - side * 2.5, 3.5, z, bx - side * 2.35, 4.6, z + 0.14, 'darkmetal');
+  const compound = (side) => {            // -1 = Ghost (west), +1 = Viper (east)
+    const bx = side * 50;
+    solid(bx - side * 4.0, 0, -9.0, bx - side * 3.2, 4.0, -3.6, 'concrete');
+    solid(bx - side * 4.0, 0, 3.6, bx - side * 3.2, 4.0, 9.0, 'concrete');
+    solid(bx - side * 4.0, 3.4, -3.6, bx - side * 3.2, 4.0, 3.6, 'concrete');
+    solid(bx + side * 2.4, 0, -8.0, bx + side * 4.6, 1.7, -5.4, 'wood');
+    solid(bx + side * 2.4, 0, 5.4, bx + side * 4.6, 1.7, 8.0, 'crateGreen');
+    deco(bx - side * 2.6, 4.6, -8.0, bx + side * 5.2, 4.9, 8.0, 'metal', { tint: 0.95 });
+    for (const cz of [-7.4, 7.4]) {
+      deco(bx - side * 2.4, 0, cz - 0.18, bx - side * 2.1, 4.6, cz + 0.18, 'darkmetal');
     }
-    for (let z = -9.2; z < -3.6; z += 1.5) {
-      const y = 3.5 * (1 - (z + 9.4) / 6);
-      deco(bx - side * 2.5, y, z - 0.06, bx - side * 2.36, y + 1.0, z + 0.06, 'darkmetal');
-    }
-    cover(bx - side * 1.5, -11.4, side, 0);
+    // Sheltered exits north and south, so a camped spawn always has a way out.
+    solid(bx - side * 4.0, 0, -22, bx - side * 3.2, 4.0, -13, 'concrete');
+    solid(bx - side * 4.0, 0, 13, bx - side * 3.2, 4.0, 22, 'concrete');
+    cover(bx - side * 5.0, -12.4, side, 0);
+    cover(bx - side * 5.0, 12.4, side, 0);
 
     const team = side < 0 ? 0 : 1;
-    const yaw = side < 0 ? -Math.PI / 2 : Math.PI / 2;   // face into the map
+    const yaw = side < 0 ? -Math.PI / 2 : Math.PI / 2;
     for (let i = 0; i < 8; i++) {
-      const sx = bx + side * (rng() * 3 - 1.5);
-      const sz = -2.8 + i * 0.8 + rng() * 0.4;
-      spawns[team].push({ x: sx, y: 0, z: sz, yaw: yaw + (rng() - 0.5) * 0.4 });
+      spawns[team].push({
+        x: bx + side * (rng() * 3.5 - 1.75),
+        y: 0, z: -3.2 + i * 0.9 + rng() * 0.4,
+        yaw: yaw + (rng() - 0.5) * 0.4,
+      });
     }
-    // Secondary spawns further forward so a spawn-camped team can break out.
-    for (const [ox, oz] of [[-8, -18], [-8, 18], [-14, -6], [-14, 6]]) {
+    for (const [ox, oz] of [[-10, -26], [-10, 26], [-16, -16], [-16, 16], [-24, 0]]) {
       spawns[team].push({ x: bx + side * ox, y: 0, z: oz, yaw });
     }
   };
   compound(-1);
   compound(1);
 
-  /* ── barrels, poles and small detail ──────────────────────────────────── */
-  const barrelSpots = [
-    [-31, -20], [-29.5, -22], [-33, 18], [-31, 20], [31, 20], [29.5, 22],
-    [33, -18], [31, -20], [-4, 12], [4, -12], [19.5, -22], [-19.5, 22],
-    [12, 6.5], [-12, -6.5], [-25, -3], [25, 3],
-  ];
-  for (const [bx, bz] of barrelSpots) {
-    const h = 0.95;
-    solid(bx - 0.34, 0, bz - 0.34, bx + 0.34, h, bz + 0.34,
+  /* ── barrels, masts and the last of the detail ────────────────────────── */
+  for (const [bx, bz] of [
+    [-43, -26], [-41.5, -28], [-45, 26], [-43, 28], [43, 28], [41.5, 26],
+    [45, -26], [43, -28], [-5, 16], [5, -16], [27, -30], [-27, 30],
+    [-33, -8], [33, 8], [-24, -34], [24, 34], [16, 20], [-16, -20],
+  ]) {
+    const h = 0.98;
+    solid(bx - 0.35, 0, bz - 0.35, bx + 0.35, h, bz + 0.35,
       rng() > 0.5 ? 'crateRed' : 'crateYell', { tint: 0.85 + rng() * 0.3 });
-    deco(bx - 0.38, h * 0.28, bz - 0.38, bx + 0.38, h * 0.36, bz + 0.38, 'darkmetal');
-    deco(bx - 0.38, h * 0.68, bz - 0.38, bx + 0.38, h * 0.76, bz + 0.38, 'darkmetal');
+    deco(bx - 0.39, h * 0.28, bz - 0.39, bx + 0.39, h * 0.36, bz + 0.39, 'darkmetal');
+    deco(bx - 0.39, h * 0.68, bz - 0.39, bx + 0.39, h * 0.76, bz + 0.39, 'darkmetal');
   }
 
-  // Light masts — also the anchors for the practical lights at dusk.
-  const mastSpots = [[-27, -16], [27, 16], [-9, 9], [9, -9], [0, -12], [0, 12]];
-  for (const [lx, lz] of mastSpots) {
-    solid(lx - 0.18, 0, lz - 0.18, lx + 0.18, 6.4, lz + 0.18, 'darkmetal');
-    deco(lx - 0.9, 6.4, lz - 0.5, lx + 0.9, 6.9, lz + 0.5, 'darkmetal');
-    lights.push(new THREE.Vector3(lx, 6.3, lz));
-  }
-
-  // Pallets and tyres to break up the ground plane.
-  for (let i = 0; i < 22; i++) {
-    const px = lerp(minX + 5, maxX - 5, rng());
-    const pz = lerp(minZ + 5, maxZ - 5, rng());
-    if (Math.abs(px) < 12 && Math.abs(pz) < 8) continue;
-    if (Math.abs(px) > 32 && Math.abs(pz) < 9) continue;
-    if (rng() > 0.5) deco(px - 0.7, 0, pz - 0.5, px + 0.7, 0.16, pz + 0.5, 'wood');
-    else {
-      deco(px - 0.42, 0, pz - 0.42, px + 0.42, 0.22, pz + 0.42, 'darkmetal', { tint: 0.45 });
-      deco(px - 0.42, 0.22, pz - 0.42, px + 0.42, 0.44, pz + 0.42, 'darkmetal', { tint: 0.4 });
-    }
+  for (const [lx, lz] of [
+    [-CROSS, -20], [CROSS, 20], [-CROSS, 20], [CROSS, -20],
+    [-42, 0], [42, 0], [0, 14], [0, -14], [-14, 34], [14, 34],
+  ]) {
+    solid(lx - 0.2, 0, lz - 0.2, lx + 0.2, 7.2, lz + 0.2, 'darkmetal');
+    deco(lx - 1.0, 7.2, lz - 0.55, lx + 1.0, 7.8, lz + 0.55, 'darkmetal');
+    lights.push(new THREE.Vector3(lx, 7.1, lz));
   }
 
   batch.toMeshes(group);
   collision.build();
+
+  // Spawn points are hand-placed, and a hand-placed point can end up inside a
+  // fuel tank. Anything that is not standing room gets dropped rather than
+  // trapping whoever spawns on it.
+  const roomToStand = (p) => {
+    const list = collision.query(p.x - 0.4, p.z - 0.4, p.x + 0.4, p.z + 0.4, []);
+    for (const b of list) {
+      if (!b.solid) continue;
+      if (b.max.x <= p.x - 0.4 || b.min.x >= p.x + 0.4) continue;
+      if (b.max.z <= p.z - 0.4 || b.min.z >= p.z + 0.4) continue;
+      if (b.max.y > p.y + 0.15 && b.min.y < p.y + 1.75) return false;
+    }
+    return true;
+  };
+  for (let team = 0; team < spawns.length; team++) {
+    const good = spawns[team].filter(roomToStand);
+    if (good.length !== spawns[team].length) {
+      console.warn(`${MAP_NAME}: dropped ${spawns[team].length - good.length} blocked spawn(s) for team ${team}`);
+    }
+    spawns[team] = good.length ? good : spawns[team];
+  }
 
   return {
     group, collision, spawns, coverPoints, indoorVolumes, lights,

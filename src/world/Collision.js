@@ -29,7 +29,7 @@ export class Brush {
     this.ramp = opts.ramp ?? null;      // { axis:'x'|'z', dir:1|-1 } — top face slopes along axis
     this.solid = opts.solid !== false;  // false = decoration, bullets still hit it
     this.noShoot = opts.noShoot === true; // bullets pass straight through (e.g. bush)
-    this.climb = opts.climb !== false;  // can be mantled onto
+    this.stand = opts.stand !== false;  // false = solid, but never a place to walk
     this.id = 0;
   }
 

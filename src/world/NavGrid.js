@@ -47,7 +47,7 @@ export class NavGrid {
         // Candidate standing heights: the top face of anything under this cell.
         const cands = new Set();
         for (const b of solids) {
-          if (!b.containsXZ(x, z)) continue;
+          if (!b.stand || !b.containsXZ(x, z)) continue;
           if (b.ramp) {
             const run = b.ramp.axis === 'x' ? b.max.x - b.min.x : b.max.z - b.min.z;
             if ((b.max.y - b.min.y) / Math.max(0.01, run) > 1.25) continue;   // too steep to walk
@@ -157,7 +157,13 @@ export class NavGrid {
     for (const br of list) {
       if (!br.solid) continue;
       if (br.max.x <= mx - 0.3 || br.min.x >= mx + 0.3 || br.max.z <= mz - 0.3 || br.min.z >= mz + 0.3) continue;
-      if (br.ramp) { if (br.topAt(mx, mz) > y0 + 0.35) return true; continue; }
+      if (br.ramp) {
+        // A ramp is a solid wedge, so it blocks only where its body is in the
+        // way. Anything whose underside is above head height — a pitched roof,
+        // a stair running over the room below — is headroom, not a wall.
+        if (br.topAt(mx, mz) > y0 + 0.35 && br.min.y < y1) return true;
+        continue;
+      }
       if (br.max.y > y0 && br.min.y < y1) return true;
     }
     return false;
