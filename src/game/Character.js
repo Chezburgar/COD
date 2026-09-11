@@ -73,6 +73,17 @@ let assets = null;
 /** The loaded rig and derived clips, once `loadCharacterAsset` has resolved. */
 export function getCharacterAssets() { return assets; }
 
+/** The operator's own hands fill the screen in first person, so their texture
+    is filtered as finely as the quality setting allows. */
+export function setCharacterAnisotropy(n) {
+  assets?.source.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    for (const map of [o.material.map, o.material.normalMap, o.material.roughnessMap]) {
+      if (map && map.anisotropy !== n) { map.anisotropy = n; map.needsUpdate = true; }
+    }
+  });
+}
+
 export async function loadCharacterAsset(onProgress) {
   if (assets) return assets;
   const loader = new GLTFLoader();

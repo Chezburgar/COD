@@ -11,6 +11,8 @@ import { Input } from './core/Input.js';
 import { audio } from './audio/AudioEngine.js';
 import { ViewModel } from './game/ViewModel.js';
 import { Game, TEAM_NAMES } from './game/Game.js';
+import { setWeaponAnisotropy } from './game/WeaponAssets.js';
+import { setCharacterAnisotropy } from './game/Character.js';
 import { LocalPlayer } from './game/Player.js';
 import { HUD } from './ui/HUD.js';
 import { Minimap } from './ui/Minimap.js';
@@ -83,6 +85,7 @@ async function boot() {
   setProgress(0.62, 'Loading operator');
   await Game.preload((p, label) => setProgress(0.62 + p * 0.3, label));
 
+  applyAnisotropy();
   setProgress(0.94, 'Building Crossfire Yard');
   await frame();
 
@@ -101,6 +104,13 @@ async function boot() {
 
 const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
 
+/** Model textures filter as finely as the current quality setting allows. */
+function applyAnisotropy() {
+  const n = renderer.aniso ?? 4;
+  setWeaponAnisotropy(n);
+  setCharacterAnisotropy(n);
+}
+
 /* ══ settings ══════════════════════════════════════════════════════════════ */
 
 function applySetting(key, value) {
@@ -108,7 +118,11 @@ function applySetting(key, value) {
     case 'sensitivity': input.sensitivity = value; break;
     case 'adsSensitivity': break;
     case 'invertY': input.invertY = value; break;
-    case 'quality': renderer.setQuality(value); renderer.setRenderScale(settings.renderScale); break;
+    case 'quality':
+      renderer.setQuality(value);
+      renderer.setRenderScale(settings.renderScale);
+      applyAnisotropy();
+      break;
     case 'renderScale': renderer.setRenderScale(value); break;
     case 'masterVolume': audio.setVolume('master', value); break;
     case 'sfxVolume': audio.setVolume('sfx', value); break;

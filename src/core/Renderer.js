@@ -185,6 +185,7 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = q.shadowType;
     this.renderer.info.autoReset = false;
+    this.aniso = q.aniso;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(80, 1, 0.06, 420);
@@ -221,6 +222,7 @@ export class Renderer {
     this.bloom.enabled = q.bloom;
     if (this.smaa) this.smaa.enabled = q.smaa;
     this.scopeTarget.setSize(q.scopeRT, q.scopeRT);
+    this.aniso = q.aniso;
     this.renderScale = q.scale;
     this._resize();
   }

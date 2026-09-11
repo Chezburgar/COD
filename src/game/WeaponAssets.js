@@ -81,6 +81,19 @@ let pack = null;
 let loading = null;
 
 export function getWeaponPack() { return pack; }
+
+/**
+ * A weapon is looked at from an inch away and at a hard glancing angle at the
+ * same time, which is exactly the case anisotropic filtering exists for — so
+ * it follows the quality setting rather than being fixed.
+ */
+export function setWeaponAnisotropy(n) {
+  const m = pack && Object.values(pack)[0]?.material;
+  if (!m) return;
+  for (const map of [m.map, m.normalMap, m.metalnessMap, m.roughnessMap]) {
+    if (map && map.anisotropy !== n) { map.anisotropy = n; map.needsUpdate = true; }
+  }
+}
 export function packWeapon(kind) { return pack ? pack[kind] ?? null : null; }
 
 export function loadWeaponPack(onProgress) {
