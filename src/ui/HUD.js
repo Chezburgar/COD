@@ -47,6 +47,7 @@ export class HUD {
     this.hitmarkTimer = 0;
     this.blood = [];
     this.bloodArt = null;
+    this.bloodCool = 0;
     this.damageT = 0;
     this.flashT = 0;
     this.flashDur = 1;
@@ -160,6 +161,7 @@ export class HUD {
     this.hurtPulse = Math.max(0, this.hurtPulse - dt * 2.4);
 
     /* blood on the camera, drying off */
+    this.bloodCool = Math.max(0, this.bloodCool - dt);
     for (const b of this.blood) {
       if (b.life <= 0) continue;
       b.life -= dt;
@@ -232,9 +234,14 @@ export class HUD {
   }
 
   bloodSplat(strength = 1, rel = null) {
+    // Under automatic fire the hits arrive faster than they can be read, so
+    // the screen is rationed: one splat per burst, and never enough of them at
+    // once to bury the fight.
+    if (this.bloodCool > 0 && strength < 1.2) return;
+    this.bloodCool = 0.42;
     const art = this._bloodArt();
     let slot = this.blood.find((b) => b.life <= 0);
-    if (!slot && this.blood.length < 7) {
+    if (!slot && this.blood.length < 4) {
       const el = document.createElement('div');
       el.className = 'blood-splat';
       this.el.bloodLayer.appendChild(el);
@@ -272,9 +279,7 @@ export class HUD {
     this.hurtPulse = 1;
     const rel0 = fromPos && myPos
       ? Math.atan2(-(fromPos.x - myPos.x), -(fromPos.z - myPos.z)) - myYaw : null;
-    const heavy = clamp01(amount / 45);
-    this.bloodSplat(0.45 + heavy, rel0);
-    if (amount > 40) this.bloodSplat(0.5 + heavy, rel0);
+    this.bloodSplat(0.45 + clamp01(amount / 45), rel0);
     if (!fromPos) return;
     const dx = fromPos.x - myPos.x, dz = fromPos.z - myPos.z;
     const worldAngle = Math.atan2(-dx, -dz);
@@ -311,7 +316,6 @@ export class HUD {
 
   died(killerName, weaponName) {
     this.bloodSplat(1.6);
-    this.bloodSplat(1.4);
     this.el.deathBy.textContent = killerName ? `${killerName} — ${weaponName}` : 'You died';
     this.el.deathScreen.classList.remove('hidden');
   }

@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { WEAPONS, THROWABLES, PERKS, DEFAULT_LOADOUT, weaponList } from '../game/Weapons.js';
 import { buildWeaponModel } from '../game/WeaponModels.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { TEAM_NAMES } from '../game/Game.js';
 import { clamp, clamp01, TAU } from '../core/MathUtils.js';
 import { esc } from './HUD.js';
@@ -197,10 +198,18 @@ export class Menu {
     const cam = new THREE.PerspectiveCamera(36, 1, 0.01, 20);
     cam.position.set(0, 0.14, 0.92);
     cam.lookAt(0, -0.01, 0);
-    const key = new THREE.DirectionalLight(0xfff0d8, 3.6); key.position.set(-1, 1.4, 1.6);
-    const rim = new THREE.DirectionalLight(0x88b4ff, 2.6); rim.position.set(1.6, 0.4, -1.4);
-    const under = new THREE.DirectionalLight(0xffc98a, 1.0); under.position.set(0.2, -1, 0.6);
-    scene.add(key, rim, under, new THREE.AmbientLight(0x7b8593, 1.5));
+    const key = new THREE.DirectionalLight(0xfff0d8, 2.6); key.position.set(-1, 1.4, 1.6);
+    const rim = new THREE.DirectionalLight(0x88b4ff, 1.6); rim.position.set(1.6, 0.4, -1.4);
+    const under = new THREE.DirectionalLight(0xffc98a, 0.8); under.position.set(0.2, -1, 0.6);
+    scene.add(key, rim, under, new THREE.AmbientLight(0x7b8593, 1.0));
+    // Weapons are part metal, and metal with nothing to reflect is black. A
+    // studio environment turns the preview into a product shot instead.
+    try {
+      const pmrem = new THREE.PMREMGenerator(r);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      scene.environmentIntensity = 1.1;
+      pmrem.dispose();
+    } catch { /* no environment: the lights alone still read */ }
     const pivot = new THREE.Group();
     scene.add(pivot);
     this.previewRenderer = { r, scene, cam, pivot, canvas, host };
@@ -240,7 +249,7 @@ export class Menu {
     // Barrels run along -Z, so turn the model broadside — otherwise the
     // preview is a view straight down the muzzle.
     holder.rotation.y = Math.PI / 2;
-    holder.scale.setScalar(0.68 / Math.max(size.x, size.y, size.z));
+    holder.scale.setScalar(0.8 / Math.max(size.x, size.y, size.z));
     p.pivot.add(holder);
     p.pivot.rotation.y = -0.42;
   }

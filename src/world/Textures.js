@@ -353,7 +353,7 @@ export function bulletHoleSprite(size = 64) {
  * HUD, over everything: a dense core of spatter, a scatter of droplets thrown
  * away from it, and a few runs pulled downward by gravity.
  */
-export function bloodScreenSplat(seed = 1, size = 512) {
+export function bloodScreenSplat(seed = 1, size = 640) {
   const [c, ctx] = canvas(size);
   const rng = mulberry32(seed * 7919 + 13);
   const cx = size * (0.3 + rng() * 0.4);
@@ -361,14 +361,24 @@ export function bloodScreenSplat(seed = 1, size = 512) {
 
   const blob = (x, y, r, alpha) => {
     // Irregular edges: a circle drawn from a wobbling radius reads as spatter,
-    // a perfect one reads as a bullet hole.
-    const pts = 14;
+    // a perfect one reads as a bullet hole. The points are joined with curves
+    // so a big splat on screen has no visible polygon edge.
+    const pts = 20;
+    const rr = [];
+    for (let i = 0; i < pts; i++) rr.push(r * (0.66 + rng() * 0.52));
+    const at = (i) => {
+      const a = ((i % pts) / pts) * Math.PI * 2;
+      return [x + Math.cos(a) * rr[i % pts], y + Math.sin(a) * rr[i % pts]];
+    };
     ctx.beginPath();
-    for (let i = 0; i <= pts; i++) {
-      const a = (i / pts) * Math.PI * 2;
-      const rr = r * (0.62 + rng() * 0.6);
-      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    let [px, py] = at(0);
+    const [nx, ny] = at(1);
+    ctx.moveTo((px + nx) / 2, (py + ny) / 2);
+    for (let i = 1; i <= pts; i++) {
+      const [cx, cy] = at(i);
+      const [ex, ey] = at(i + 1);
+      ctx.quadraticCurveTo(cx, cy, (cx + ex) / 2, (cy + ey) / 2);
+      px = cx; py = cy;
     }
     ctx.closePath();
     const g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.15);
@@ -379,16 +389,20 @@ export function bloodScreenSplat(seed = 1, size = 512) {
     ctx.fill();
   };
 
+  ctx.filter = 'blur(2px)';
   for (let i = 0; i < 5; i++) {
     blob(cx + (rng() - 0.5) * size * 0.3, cy + (rng() - 0.5) * size * 0.3,
       size * (0.07 + rng() * 0.12), 0.72 + rng() * 0.24);
   }
+  ctx.filter = 'none';
+  ctx.filter = 'blur(1px)';
   for (let i = 0; i < 90; i++) {
     const a = rng() * Math.PI * 2;
     const d = size * (0.08 + Math.pow(rng(), 0.6) * 0.5);
     blob(cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.9,
-      size * (0.004 + Math.pow(rng(), 2) * 0.03), 0.4 + rng() * 0.5);
+      size * (0.004 + Math.pow(rng(), 2) * 0.03), 0.55 + rng() * 0.45);
   }
+  ctx.filter = 'none';
   for (let i = 0; i < 5; i++) {                       // runs
     const x = cx + (rng() - 0.5) * size * 0.4;
     const y = cy + (rng() - 0.5) * size * 0.2;
