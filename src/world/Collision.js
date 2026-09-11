@@ -21,6 +21,9 @@ export const SURFACE = {
 };
 
 const CELL = 4;
+
+/** Share of the body radius that actually carries weight. */
+const FOOT_RADIUS = 0.55;
 const _v = new THREE.Vector3();
 
 export class Brush {
@@ -163,6 +166,10 @@ export class CollisionWorld {
    * @returns {{ ground:boolean, ceiling:boolean, wall:boolean, groundMat:string, groundNormal:THREE.Vector3, stepped:number }}
    */
   moveCharacter(pos, radius, height, delta, stepHeight = 0.55, snapToGround = false) {
+    // Feet are narrower than shoulders. Standing on whatever the full body
+    // radius touches means popping up onto a step half a metre before
+    // reaching it, which is what makes the top of a ramp lurch.
+    const feet = radius * FOOT_RADIUS;
     const res = {
       ground: false, ceiling: false, wall: false, wallNormal: new THREE.Vector3(),
       groundMat: 'concrete', groundNormal: new THREE.Vector3(0, 1, 0), stepped: 0,
@@ -201,7 +208,7 @@ export class CollisionWorld {
     }
     if (res.stepped > 0) {
       // Settle back down onto whatever we stepped onto.
-      const top = this.floorAt(pos.x, pos.z, pos.y + 0.05, radius, solids);
+      const top = this.floorAt(pos.x, pos.z, pos.y + 0.05, feet, solids);
       if (top !== null && top >= startY - 0.01 && top <= startY + stepHeight + 0.01) pos.y = top;
     }
 
@@ -216,7 +223,7 @@ export class CollisionWorld {
     const searchFrom = snapToGround
       ? pos.y + stepHeight
       : pos.y + Math.max(0.02, -delta.y) + 0.02;
-    const floor = this.floorAt(pos.x, pos.z, searchFrom, radius, solids);
+    const floor = this.floorAt(pos.x, pos.z, searchFrom, feet, solids);
     if (floor !== null) {
       const climbing = pos.y <= floor + 0.001;
       const glued = snapToGround && pos.y - floor <= stepHeight;

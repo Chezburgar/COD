@@ -24,6 +24,12 @@ export const MOVE = {
   slideSpeed: 8.6, slideTime: 0.72, slideCooldown: 1.1,
 };
 
+export const MAX_HEALTH = 100;
+
+/** Recovery out of contact: how long before it starts, how fast it runs, and
+    how long it takes to reach that rate. */
+export const REGEN = { delay: 4.2, rate: 32, ramp: 0.9 };
+
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -46,7 +52,9 @@ export class Combatant {
     this.grounded = true;
     this.groundMat = 'concrete';
 
-    this.health = 100;
+    this.health = MAX_HEALTH;
+    this.regenActive = false;
+    this.regenStartedAt = 0;
     this.alive = true;
     this.respawnAt = 0;
     this.lastDamageBy = null;
@@ -435,6 +443,22 @@ export class Combatant {
     return true;
   }
 
+  /* ── recovery ──────────────────────────────────────────────────────────── */
+  /**
+   * Out of contact long enough and the operator patches up: a firefight
+   * survived on ten health is not a match spent at ten health. Only the host
+   * runs this — clients are told their health in the snapshot.
+   */
+  regenerate(now, dt) {
+    if (!this.alive || this.health >= MAX_HEALTH) { this.regenActive = false; return; }
+    const delay = this.perk === 'medic' ? REGEN.delay * 0.6 : REGEN.delay;
+    if (now - this.lastDamageAt < delay) { this.regenActive = false; return; }
+    if (!this.regenActive) { this.regenActive = true; this.regenStartedAt = now; }
+    // A short ramp so the bar visibly starts moving rather than snapping.
+    const ramp = clamp01((now - this.regenStartedAt) / REGEN.ramp);
+    this.health = Math.min(MAX_HEALTH, this.health + REGEN.rate * (0.45 + 0.55 * ramp) * dt);
+  }
+
   /* ── damage ────────────────────────────────────────────────────────────── */
   applyDamage(amount, attacker, now, kind = 'bullet') {
     if (!this.alive) return 0;
@@ -442,6 +466,7 @@ export class Combatant {
     const dealt = Math.min(this.health, amount);
     this.health -= amount;
     this.lastDamageAt = now;
+    this.regenActive = false;
     if (attacker && attacker.id !== this.id) {
       this.lastDamageBy = attacker.id;
       this.assistCredit.set(attacker.id, (this.assistCredit.get(attacker.id) ?? 0) + dealt);

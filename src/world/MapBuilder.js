@@ -206,6 +206,55 @@ export function buildMap() {
 
   const cover = (x, z, dirX, dirZ) => coverPoints.push({ x, z, dx: dirX, dz: dirZ });
 
+  /**
+   * A flight of stairs: a smooth collision wedge, dressed with treads, risers
+   * and stringers that ride on it. The player still walks the ramp — which is
+   * what keeps the climb steady — but it reads as steps rather than a slide.
+   * Each tread sits at the wedge's own height at the middle of that step, so
+   * the surface underfoot is never more than half a riser away from the boards.
+   */
+  const stairs = (x0, y0, z0, x1, y1, z1, axis, dir, matKey, opts = {}) => {
+    solid(x0, y0, z0, x1, y1, z1, matKey,
+      { ...opts, ramp: { axis, dir }, faces: { ...opts.faces, top: false } });
+
+    const along = axis === 'x';
+    const lo = along ? x0 : z0, hi = along ? x1 : z1;
+    const wLo = along ? z0 : x0, wHi = along ? z1 : x1;
+    const run = hi - lo, rise = y1 - y0;
+    const n = Math.max(3, Math.round(run / (opts.tread ?? 0.44)));
+    const t = run / n;
+    const heightAt = (a) => {
+      const f = (a - lo) / run;
+      return y0 + rise * (dir > 0 ? f : 1 - f);
+    };
+    const box = (a0, a1, yA, yB, b0 = wLo, b1 = wHi) => (along
+      ? deco(a0, yA, b0, a1, yB, b1, opts.trim ?? matKey)
+      : deco(b0, yA, a0, b1, yB, a1, opts.trim ?? matKey));
+
+    for (let i = 0; i < n; i++) {
+      const a = lo + i * t, b = a + t;
+      const y = heightAt((a + b) / 2);
+      if (!opts.cleats) box(a, b, y - 0.075, y);                       // tread
+      else box(a + t * 0.35, a + t * 0.65, y - 0.03, y + 0.035);        // batten on a plank ramp
+      if (opts.cleats) continue;
+      const edge = dir > 0 ? b : a;                                     // the uphill lip
+      const next = heightAt(edge + (dir > 0 ? t / 2 : -t / 2));
+      if (Math.abs(next - y) > 0.01) {
+        const r0 = Math.min(y, next) - 0.075, r1 = Math.max(y, next);
+        box(edge - 0.05, edge + 0.05, r0, r1);
+      }
+    }
+    if (opts.cleats) return;
+    // Stringers down both sides, following the same slope.
+    for (const side of [0, 1]) {
+      const c0 = side ? wHi - 0.12 : wLo;
+      const c1 = side ? wHi : wLo + 0.12;
+      const a0 = along ? x0 : c0, a1 = along ? x1 : c1;
+      const b0 = along ? c0 : z0, b1 = along ? c1 : z1;
+      deco(a0, y0 - 0.28, b0, a1, y1 - 0.1, b1, opts.trim ?? matKey, { ramp: { axis, dir } });
+    }
+  };
+
   /** A practical light. Indoors there is no sun and no bounce, so the few
       rooms in the depot carry their own. */
   const lamp = (x, y, z, intensity, distance) => {
@@ -301,7 +350,7 @@ export function buildMap() {
   deco(hg.x0 + hg.t, hg.mez + 1.0, -34.22, hg.x1 - hg.t, hg.mez + 1.15, -34.0, 'darkmetal');
   for (const [lx0, lx1] of [[hg.x0 + hg.t, hg.x0 + 5], [hg.x1 - 5, hg.x1 - hg.t]]) {
     solid(lx0, hg.mez - 0.25, -34, lx1, hg.mez, -31.4, 'grate');
-    solid(lx0, 0, -31.4, lx1, hg.mez, -24.4, 'grate', { ramp: { axis: 'z', dir: -1 } });
+    stairs(lx0, 0, -31.4, lx1, hg.mez, -24.4, 'z', -1, 'grate', { trim: 'darkmetal' });
     for (let z = -31.2; z < -24.8; z += 1.6) {
       const y = hg.mez * (1 - (z + 31.4) / 7);
       for (const rx of [lx0, lx1 - 0.14]) {
@@ -366,8 +415,8 @@ export function buildMap() {
   solid(STAIR.x0, cb.floor - 0.4, cb.z0, cb.x1, cb.floor, STAIR.top, 'concrete');
   // One long flight up the east bay — short enough stairs are unwalkable, and
   // a flight that steep is worse than no stair at all.
-  solid(STAIR.x0, 0, STAIR.top, STAIR.x1, cb.floor, STAIR.bottom, 'concrete',
-    { ramp: { axis: 'z', dir: -1 } });
+  stairs(STAIR.x0, 0, STAIR.top, STAIR.x1, cb.floor, STAIR.bottom, 'z', -1, 'concrete',
+    { tread: 0.5 });
   for (let z = STAIR.top + 0.6; z < STAIR.bottom; z += 1.6) {
     const y = cb.floor * (1 - (z - STAIR.top) / (STAIR.bottom - STAIR.top));
     deco(STAIR.x0, y, z - 0.07, STAIR.x0 + 0.14, y + 1.05, z + 0.07, 'darkmetal');
@@ -405,7 +454,7 @@ export function buildMap() {
   // Outside stair to the upper floor, so it can be taken from the plaza too,
   // landing on a balcony that runs to the west doorway.
   solid(cb.x0 - 4.6, cb.floor - 0.3, -5.2, cb.x0, cb.floor, 1.0, 'grate');
-  solid(cb.x0 - 4.6, 0, 1.0, cb.x0, cb.floor, 8.6, 'grate', { ramp: { axis: 'z', dir: -1 } });
+  stairs(cb.x0 - 4.6, 0, 1.0, cb.x0, cb.floor, 8.6, 'z', -1, 'grate', { trim: 'darkmetal' });
   for (let z = 1.2; z < 8.4; z += 1.5) {
     const y = cb.floor * (1 - (z - 1.0) / 7.6);
     deco(cb.x0 - 4.6, y, z - 0.07, cb.x0 - 4.46, y + 1.05, z + 0.07, 'darkmetal');
@@ -515,7 +564,8 @@ export function buildMap() {
     // The climb tops out before the box and finishes on a short landing that
     // laps over its edge: a ramp that arrives mid-air beside a platform reads
     // as a step to a player and as a wall to everything else.
-    solid(s * 20 - 1.5, 0, 17.0, s * 20 + 1.5, CH, 21.0, 'wood', { ramp: { axis: 'z', dir: 1 } });
+    stairs(s * 20 - 1.5, 0, 17.0, s * 20 + 1.5, CH, 21.0, 'z', 1, 'wood',
+      { cleats: true, tread: 0.5, trim: 'darkmetal' });
     solid(s * 20 - 1.5, CH - 0.2, 21.0, s * 20 + 1.5, CH, 22.6, 'wood');
     for (let z = 17.4; z < 20.9; z += 0.85) {
       const y = ((z - 17.0) / 4.0) * CH;

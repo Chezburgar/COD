@@ -97,6 +97,7 @@ export class Game {
     const c = new Combatant({ id: 1, name, team, isLocal: true, loadout: { ...DEFAULT_LOADOUT, ...loadout } });
     this.local = c;
     this._register(c, { nameplate: false, localBody: true });
+    this.vm?.setTeam(team);
     return c;
   }
 
@@ -325,6 +326,9 @@ export class Game {
         }
       }
     }
+
+    /* ── recovery ────────────────────────────────────────────────── */
+    if (isHost) for (const c of this.combatants) c.regenerate(now, dt);
 
     /* ── history for lag compensation ────────────────────────────── */
     if (isHost) for (const c of this.combatants) c.recordHistory(now);

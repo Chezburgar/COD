@@ -24,7 +24,12 @@ import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { buildWorldWeaponModel } from './WeaponModels.js';
 import { clamp, clamp01, damp, dampAngle, angleDelta, lerp, rand, TAU } from '../core/MathUtils.js';
 
-const MODEL_URL = new URL('../assets/soldier.glb', import.meta.url).href;
+/** One operator per team, so the two sides read apart at a glance. Both are
+    the same rig with the same clips, so everything below is shared. */
+const MODEL_URLS = [
+  new URL('../assets/soldier.glb', import.meta.url).href,
+  new URL('../assets/soldier-white.glb', import.meta.url).href,
+];
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
@@ -71,27 +76,40 @@ function stripRootMotion(clip) {
 let assets = null;
 
 /** The loaded rig and derived clips, once `loadCharacterAsset` has resolved. */
-export function getCharacterAssets() { return assets; }
+export function getCharacterAssets(team = 0) {
+  return assets ? assets[team] ?? assets[0] : null;
+}
 
 /** The operator's own hands fill the screen in first person, so their texture
     is filtered as finely as the quality setting allows. */
 export function setCharacterAnisotropy(n) {
-  assets?.source.traverse((o) => {
-    if (!o.isMesh || !o.material) return;
-    for (const map of [o.material.map, o.material.normalMap, o.material.roughnessMap]) {
-      if (map && map.anisotropy !== n) { map.anisotropy = n; map.needsUpdate = true; }
-    }
-  });
+  for (const a of assets ?? []) {
+    a.source.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      for (const map of [o.material.map, o.material.normalMap, o.material.roughnessMap]) {
+        if (map && map.anisotropy !== n) { map.anisotropy = n; map.needsUpdate = true; }
+      }
+    });
+  }
 }
 
 export async function loadCharacterAsset(onProgress) {
   if (assets) return assets;
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync(MODEL_URL, (e) => {
-    if (e.lengthComputable) onProgress?.(e.loaded / e.total);
-  });
+  const loaded = [];
+  for (let i = 0; i < MODEL_URLS.length; i++) {
+    const gltf = await loader.loadAsync(MODEL_URLS[i], (e) => {
+      if (e.lengthComputable) onProgress?.((i + e.loaded / e.total) / MODEL_URLS.length);
+    });
+    loaded.push(buildAsset(gltf));
+  }
+  assets = loaded;
+  return assets;
+}
 
+/** Turns one loaded operator into the rig and the clips the game animates. */
+function buildAsset(gltf) {
   const source = gltf.scene;
   source.traverse((o) => {
     if (!o.isMesh) return;
@@ -127,8 +145,7 @@ export async function loadCharacterAsset(onProgress) {
     shootUpper: filterClip(shoot, UPPER, 'shootUpper'),
   };
 
-  assets = { source, clips, idleTime, aimTime };
-  return assets;
+  return { source, clips, idleTime, aimTime };
 }
 
 /**
@@ -194,7 +211,7 @@ function findWeaponFrame(source, clip) {
 
 export class Character {
   constructor(scene, team, { nameplate = false } = {}) {
-    const { source, clips } = assets;
+    const { source, clips } = getCharacterAssets(team);
     this.scene = scene;
     this.team = team;
 

@@ -95,6 +95,7 @@ export class ViewModel {
     this.model = null;
     this.kind = null;
     this.arms = null;
+    this.team = 0;
 
     // Animation state.
     this.t = 0;
@@ -175,7 +176,8 @@ export class ViewModel {
    */
   _placeArms(kind) {
     if (!this.arms) {
-      const assets = getCharacterAssets();
+      // The hands on screen are the operator this player is actually wearing.
+      const assets = getCharacterAssets(this.team ?? 0);
       if (!assets) return;
       this.arms = new FirstPersonArms(assets);
       if (!this.arms.ok) { this.arms = null; return; }
@@ -637,6 +639,14 @@ export class ViewModel {
     out.copy(this.model.userData.muzzle).applyMatrix4(this.rig.matrixWorld);
     // vmCamera sits at the origin of its own scene; map into the world camera.
     return out.applyMatrix4(camera.matrixWorld);
+  }
+
+  /** Which team's operator the first-person hands belong to. */
+  setTeam(team) {
+    if (team === this.team) return;
+    this.team = team;
+    if (this.arms) { this.rig.remove(this.arms.group); this.arms.dispose(); this.arms = null; }
+    if (this.kind) this._placeArms(this.kind);
   }
 
   dispose() {

@@ -9,6 +9,7 @@
    analytically so it stays razor sharp at any resolution.
    ══════════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -155,6 +156,14 @@ const GradeShader = {
   `,
 };
 
+/** Pre-filters a scene into an environment map and throws the generator away. */
+function pmremFor(renderer, scene, sigma = 0, near = 0.1, far = 100) {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const map = pmrem.fromScene(scene, sigma, near, far).texture;
+  pmrem.dispose();
+  return map;
+}
+
 /** Shared by the sky shader and the directional light so they can't drift apart. */
 /* Mid-afternoon rather than noon: a lower sun rakes across every surface,
    throws long shadows that separate the lanes, and gives the level far more
@@ -174,8 +183,11 @@ export class Renderer {
     this.quality = QUALITY[quality] ? quality : 'high';
     const q = QUALITY[this.quality];
 
+    // The world is anti-aliased by the post stack, but the view model is drawn
+    // straight to the canvas after it — so the canvas needs its own multisample
+    // buffer or the weapon in your hands is the one jagged thing on screen.
     this.renderer = new THREE.WebGLRenderer({
-      canvas, antialias: false, powerPreference: 'high-performance',
+      canvas, antialias: true, powerPreference: 'high-performance',
       stencil: false, depth: true, alpha: false,
     });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -271,15 +283,20 @@ export class Renderer {
     // Pre-filter the sky into an environment map. Without this every metallic
     // surface has nothing to reflect and renders black, and shadowed sides of
     // geometry lose all their bounce light.
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
     const envScene = new THREE.Scene();
     envScene.add(new THREE.Mesh(sky.geometry, sky.material));
-    this.envMap = pmrem.fromScene(envScene, 0, 1, 1200).texture;
-    pmrem.dispose();
+    this.envMap = pmremFor(this.renderer, envScene, 0, 1, 1200);
     this.scene.environment = this.envMap;
     this.scene.environmentIntensity = 1.0;
-    this.vmScene.environment = this.envMap;
-    this.vmScene.environmentIntensity = 1.0;
+
+    // The view model gets a studio environment rather than the sky. A weapon
+    // held a foot from the eye is mostly reflection, and a smooth sky gradient
+    // gives it nothing to reflect — which is why the same model looks sharper
+    // on the loadout screen than it did in hand.
+    const room = pmremFor(this.renderer, new RoomEnvironment());
+    this.vmEnvMap = room;
+    this.vmScene.environment = room;
+    this.vmScene.environmentIntensity = 0.85;
   }
 
   _buildLights() {

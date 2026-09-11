@@ -6,6 +6,9 @@ import { BTN, MOVE } from './Combatant.js';
 import { WEAPONS, THROWABLES } from './Weapons.js';
 import { clamp, clamp01, damp, lerp, rand, smoothstep, TAU } from '../core/MathUtils.js';
 
+/** How fast the eye catches up after the body steps up, in metres a second. */
+const STEP_CATCHUP = 4.2;
+
 const _v = new THREE.Vector3();
 
 export class LocalPlayer {
@@ -190,6 +193,20 @@ export class LocalPlayer {
 
     /* ── camera transform ────────────────────────────────────────── */
     c.eyePos(_v);
+
+    // Stair smoothing. Stepping onto anything raises the body in one frame,
+    // and the eye following that exactly is what makes a ramp or a kerb lurch.
+    // The eye is allowed to climb at its own pace and catches up in about a
+    // tenth of a second; in the air it tracks exactly, so a fall still reads
+    // as a fall.
+    if (!c.grounded || this.stepLag === undefined) this.stepLag = 0;
+    else {
+      const rise = _v.y - (this.lastEyeY ?? _v.y);
+      if (rise > 0.012 && rise < 0.8) this.stepLag = Math.min(0.45, this.stepLag + rise);
+      this.stepLag = Math.max(0, this.stepLag - STEP_CATCHUP * dt);
+    }
+    this.lastEyeY = _v.y;
+    _v.y -= this.stepLag;
 
     // Landing dip.
     if (ctx.landImpulse) this.landDipVel -= ctx.landImpulse * 0.55;

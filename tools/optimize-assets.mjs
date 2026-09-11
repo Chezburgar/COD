@@ -49,11 +49,16 @@ for (const mesh of root.listMeshes()) {
   }
 }
 
+// Welding by position and simplifying across UV seams drags the texture over
+// every seam it collapses, which on a baked character is the difference
+// between a face and a smear. So the weld is exact-match only and the
+// simplifier is told to leave borders alone.
+const RATIO = Number(process.env.CHAR_RATIO ?? 0.3);
 await doc.transform(
   resample(),
   dedup(),
-  weld({ tolerance: 0.0001 }),
-  simplify({ simplifier: MeshoptSimplifier, ratio: 0.14, error: 0.006, lockBorder: false }),
+  weld({ tolerance: 0 }),
+  simplify({ simplifier: MeshoptSimplifier, ratio: RATIO, error: 0.003, lockBorder: true }),
   prune({ keepAttributes: false, keepLeaves: false }),
 );
 
@@ -62,11 +67,13 @@ await doc.transform(
 for (const texture of root.listTextures()) {
   const slot = texture.getName() ?? '';
   const isMR = /metal|rough/i.test(slot);
-  const size = isMR ? 512 : 1024;
+  // The operator's own hands are a foot from the camera in first person, so
+  // the colour atlas keeps real resolution; the metal-rough mask never needs it.
+  const size = isMR ? 512 : 1536;
   const before = texture.getImage().byteLength;
   const out = await sharp(Buffer.from(texture.getImage()))
     .resize(size, size, { fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: isMR ? 72 : 88, effort: 6 })
+    .webp({ quality: isMR ? 74 : 90, effort: 6 })
     .toBuffer();
   texture.setImage(new Uint8Array(out)).setMimeType('image/webp');
   console.log(`  texture ${slot}: ${(before / 1e6).toFixed(1)} MB -> ${(out.length / 1e6).toFixed(2)} MB @${size}`);

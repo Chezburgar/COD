@@ -110,6 +110,7 @@ export class HUD {
       this._lastHealth = hp;
       this.el.health.style.width = `${hp * 100}%`;
       this.el.healthBar.classList.toggle('hurt', hp <= 0.6 && hp > 0.3);
+      this.el.healthBar.classList.toggle('regen', !!c.regenActive && hp < 1);
       this.el.healthBar.classList.toggle('crit', hp <= 0.3);
     }
 
