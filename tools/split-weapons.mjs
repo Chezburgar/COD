@@ -20,7 +20,12 @@ import path from 'node:path';
 
 const SRC = process.argv[2];
 const DST = process.argv[3] ?? 'src/assets/weapons.glb';
-const TARGET_TRIS = Number(process.argv[4] ?? 16000);
+// 0 keeps every triangle the pack shipped. Welding and simplifying both
+// collapse vertices across UV seams, which smears the texture over the seam —
+// on a gun, where every panel line is a seam, that is what turns a crisp
+// receiver into a melted one. Fidelity is the point here, so neither runs
+// unless a triangle budget is asked for explicitly.
+const TARGET_TRIS = Number(process.argv[4] ?? 0);
 
 await MeshoptSimplifier.ready;
 await MeshoptEncoder.ready;
@@ -34,7 +39,8 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 
 const doc = await io.read(SRC);
 const root = doc.getRoot();
-const srcPrim = root.listMeshes()[0].listPrimitives()[0];
+const srcMesh = root.listMeshes()[0];
+const srcPrim = srcMesh.listPrimitives()[0];
 const material = srcPrim.getMaterial();
 
 const POS = srcPrim.getAttribute('POSITION').getArray();
@@ -172,6 +178,24 @@ shells.forEach((tris, i) => {
     `muzzle=${frontIsMin ? '-' : '+'}${'xyz'[longAxis]} flipUp=${flipUp}`);
 
   // Rewrite positions into game space: -Z forward, +Y up, +X right.
+  //
+  // Sending the gun's own three axes to (z, y, x) is a permutation, and a
+  // permutation can just as easily be a reflection as a rotation — which would
+  // hand the game a left-handed copy of every weapon, ejection port and all.
+  // So the determinant is computed and the sideways axis signed to keep it
+  // positive, which is a rotation and leaves the winding alone.
+  const sl = frontIsMin ? 1 : -1;                // long axis -> -Z (muzzle)
+  const su = flipUp ? -1 : 1;                    // up axis -> +Y
+  let st = 1;                                    // thin axis -> +X
+  const detOf = (sx) => {
+    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    A[0][thinAxis] = sx; A[1][upAxis] = su; A[2][longAxis] = sl;
+    return A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1])
+         - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0])
+         + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+  };
+  if (detOf(st) < 0) st = -1;
+
   const out = new Float32Array(n * 3);
   const outN = NRM ? new Float32Array(n * 3) : null;
   const map = (v, arr, dst, isDir) => {
@@ -179,17 +203,14 @@ shells.forEach((tris, i) => {
     const l = isDir ? L : L - (frontIsMin ? max[longAxis] : min[longAxis]);
     const u = isDir ? U : U - min[upAxis];
     const t = isDir ? T : T - (min[thinAxis] + max[thinAxis]) / 2;
-    dst[v * 3] = t;                              // thin axis -> right
-    dst[v * 3 + 1] = flipUp ? -u : u;            // up
-    dst[v * 3 + 2] = frontIsMin ? l : -l;        // long axis -> forward (-Z)
+    dst[v * 3] = st * t;
+    dst[v * 3 + 1] = su * u;
+    dst[v * 3 + 2] = sl * l;
   };
   for (let v = 0; v < n; v++) {
     map(v, pos, out, false);
     if (NRM) map(v, nrm, outN, true);
   }
-  // Winding flips when the basis does.
-  const det = (frontIsMin ? 1 : -1) * (flipUp ? -1 : 1);
-  if (det < 0) for (let t = 0; t < idx.length; t += 3) { const a = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = a; }
 
   const prim = doc.createPrimitive()
     .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(out).setBuffer(buffer))
@@ -202,15 +223,23 @@ shells.forEach((tris, i) => {
   scene.addChild(doc.createNode(`weapon_${i}`).setMesh(mesh));
 });
 
-const ratio = Math.min(1, (TARGET_TRIS * shells.length) / (IDX.length / 3));
-console.log(`\nsimplifying to ~${TARGET_TRIS} tris each (ratio ${ratio.toFixed(3)})`);
+// The sheet itself has been read into the per-weapon shells; leaving it in the
+// document would ship every triangle twice.
+srcMesh.dispose();
+srcPrim.dispose();
 
-await doc.transform(
-  dedup(),
-  weld({ tolerance: 0.0001 }),
-  simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.004, lockBorder: false }),
-  prune({ keepAttributes: false }),
-);
+if (TARGET_TRIS > 0) {
+  const ratio = Math.min(1, (TARGET_TRIS * shells.length) / (IDX.length / 3));
+  console.log(`\nsimplifying to ~${TARGET_TRIS} tris each (ratio ${ratio.toFixed(3)})`);
+  await doc.transform(
+    weld({ tolerance: 0.0001 }),
+    // Borders locked: a collapse across a UV seam drags the texture with it.
+    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.002, lockBorder: true }),
+  );
+} else {
+  console.log('\nkeeping every triangle');
+}
+await doc.transform(dedup(), prune({ propertyTypes: [] }));
 
 /* Texture budget by what each map is actually for: colour and relief carry the
    detail you look at down the sights, so they stay full size, while the
@@ -241,7 +270,7 @@ for (const ext of root.listExtensionsUsed()) {
 
 await doc.transform(
   reorder({ encoder: MeshoptEncoder, target: 'performance' }),
-  quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 12 }),
+  quantize({ quantizePosition: 14, quantizeNormal: 10, quantizeTexcoord: 14 }),
 );
 doc.createExtension((await import('@gltf-transform/extensions')).EXTMeshoptCompression)
   .setRequired(true).setEncoderOptions({ method: 'QUANTIZE' });

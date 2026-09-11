@@ -38,14 +38,17 @@ const GRIPS = {
    every shooter uses. Poses below are in real camera-space metres. */
 const VM_SCALE = 0.7;
 
-/* Resting pose per family (hip fire). */
+/* Resting pose per family (hip fire). Distances are paired with the view
+   model's own field of view in Player: the weapon is carried further from the
+   eye than arm's length and the lens is narrowed to match, which keeps it the
+   same size on screen while taking the stretch out of the barrel. */
 const HIP = {
-  default:  { pos: [0.126, -0.118, -0.33], rot: [0.015, 0.055, -0.02] },
-  pistol:   { pos: [0.108, -0.112, -0.40], rot: [0.02, 0.06, -0.02] },
-  knife:    { pos: [0.146, -0.122, -0.26], rot: [0.16, -0.38, 0.24] },
-  grenade:  { pos: [0.140, -0.140, -0.28], rot: [0.08, -0.16, 0.08] },
-  sniper:   { pos: [0.142, -0.126, -0.37], rot: [0.015, 0.05, -0.02] },
-  lmg:      { pos: [0.144, -0.136, -0.35], rot: [0.015, 0.05, -0.02] },
+  default:  { pos: [0.170, -0.159, -0.446], rot: [0.015, 0.055, -0.02] },
+  pistol:   { pos: [0.146, -0.151, -0.540], rot: [0.02, 0.06, -0.02] },
+  knife:    { pos: [0.197, -0.165, -0.351], rot: [0.16, -0.38, 0.24] },
+  grenade:  { pos: [0.189, -0.189, -0.378], rot: [0.08, -0.16, 0.08] },
+  sniper:   { pos: [0.192, -0.170, -0.500], rot: [0.015, 0.05, -0.02] },
+  lmg:      { pos: [0.194, -0.184, -0.473], rot: [0.015, 0.05, -0.02] },
 };
 
 /* Per-family arm tuning: where the elbow is carried, how the wrist is pitched
@@ -244,8 +247,8 @@ export class ViewModel {
     // How far the optic ends up from the eye. A pistol is held at arm's
     // length, and pushing it out there also keeps the forearms from filling
     // the frame; a scope has to come closer for the eye box to work.
-    const adsDist = weapon.sight === 'scope' ? 0.24
-      : PISTOLS.has(weapon.model) ? 0.42 : 0.33;
+    const adsDist = weapon.sight === 'scope' ? 0.324
+      : PISTOLS.has(weapon.model) ? 0.567 : 0.446;
     this.adsPos = new THREE.Vector3(-s.x * k, -s.y * k, -adsDist - s.z * k);
     this.adsRot = new THREE.Euler(0, 0, 0);
 

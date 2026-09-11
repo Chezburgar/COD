@@ -168,7 +168,9 @@ export class LocalPlayer {
     const targetFov = lerp(baseFov + sprintBoost + slideBoost, adsFov, smoothstep(c.adsAmount));
     this.hudFov = damp(this.hudFov, targetFov, 14, dt);
     r.setFov(this.hudFov);
-    r.setVmFov(lerp(62, 50, c.adsAmount));
+    // A narrow lens on a weapon held further out: the same picture on screen
+    // with far less of the barrel-stretching a wide close-up lens gives.
+    r.setVmFov(lerp(48, 38, c.adsAmount));
 
     /* ── scope ───────────────────────────────────────────────────── */
     const scoped = !!w.scope && c.adsAmount > 0.5;
