@@ -278,7 +278,10 @@ export class Renderer {
     sky.renderOrder = -1000;
     this.scene.add(sky);
     this.sky = sky;
-    this.scene.fog = new THREE.FogExp2(0xcdcab4, 0.0058);
+    // Tuned for a map twice the old one's span with a city standing behind
+    // it: at 0.0058 the far towers were a flat wash and the skyline read as
+    // haze rather than as buildings.
+    this.scene.fog = new THREE.FogExp2(0xc3c6c2, 0.0026);
 
     // Pre-filter the sky into an environment map. Without this every metallic
     // surface has nothing to reflect and renders black, and shadowed sides of
@@ -318,9 +321,12 @@ export class Renderer {
     this.sunDir = sunDir;
 
     // Sky/ground bounce. Keeps shadowed sides readable without washing out.
-    this.hemi = new THREE.HemisphereLight(0xa8cbec, 0x8a7f6c, 1.55);
+    // A city occludes far more sky than the old depot did, so the fill carries
+    // more of the load: soffits, arcades and tower interiors are black without
+    // it, and a room you cannot see an enemy in is not a room.
+    this.hemi = new THREE.HemisphereLight(0xa8cbec, 0x8a7f6c, 1.95);
     this.scene.add(this.hemi);
-    this.scene.add(new THREE.AmbientLight(0x6e7a8a, 0.55));
+    this.scene.add(new THREE.AmbientLight(0x6e7a8a, 0.78));
 
     // The view model gets its own rig so it reads well against any backdrop.
     // Kept close to the sun's own strength: brighter than that and the weapon
@@ -373,6 +379,17 @@ export class Renderer {
     this.sun.target.position.set(target.x, 0, target.z);
     this.sun.position.copy(this.sunDir).multiplyScalar(95).add(this.sun.target.position);
     this.sun.target.updateMatrixWorld();
+  }
+
+  /**
+   * Compiles every shader the loaded scene needs, up front. Without this the
+   * first appearance of anything — a decal, a tracer, an operator at a new
+   * angle — pays for its shader on the frame it appears, which is felt as a
+   * stutter. Called once a match is built, while the map toast is still up.
+   */
+  precompile() {
+    this.renderer.compile(this.scene, this.camera);
+    this.renderer.compile(this.vmScene, this.vmCamera);
   }
 
   /**

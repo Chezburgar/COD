@@ -106,8 +106,15 @@ export class Effects {
     };
     const N = 220;
     this.bbs = [];
+    // One shared quad, and every material starts out holding a texture. A
+    // material that gains its first map changes its program key, so a pool
+    // that starts empty compiles a shader the first time each slot is used —
+    // a stutter spread across the whole match. Starting mapped, swapping the
+    // map later is a uniform change and nothing more.
+    const geo = new THREE.PlaneGeometry(1, 1);
     for (let i = 0; i < N; i++) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        map: this.bbTex.smoke,
         transparent: true, depthWrite: false, toneMapped: false, opacity: 0,
       }));
       m.visible = false;
@@ -125,11 +132,11 @@ export class Effects {
     // program actually changed — otherwise every puff of smoke costs a
     // shader re-evaluation.
     const map = this.bbTex[tex] ?? tex;
-    const blending = opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
-    if (m.material.map !== map || m.material.blending !== blending) {
+    // Blending is render state, not part of the program, so it needs no flag.
+    m.material.blending = opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending;
+    if (m.material.map !== map) {
       m.material.map = map;
-      m.material.blending = blending;
-      m.material.needsUpdate = true;
+      m.material.needsUpdate = true;      // refreshes the uniform; same program
     }
     m.material.color.setHex(opts.color ?? 0xffffff);
     m.position.copy(pos);
@@ -158,6 +165,7 @@ export class Effects {
     const geo = new THREE.PlaneGeometry(1, 1);
     for (let i = 0; i < N; i++) {
       const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        map: this.decalTex.hole,
         transparent: true, depthWrite: false, opacity: 0,
         polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
       }));
@@ -229,11 +237,18 @@ export class Effects {
   }
 
   /* ── dynamic lights ────────────────────────────────────────────────────── */
+  /**
+   * The flash pool never leaves the scene. three.js puts the number of point
+   * lights into a material's program cache key, so hiding one and showing it
+   * again makes every lit material in the scene recompile — measured at 1.4s
+   * of stall on the frame a grenade went off. An idle light costs nothing
+   * measurable per frame; a recompile costs the whole frame. So they idle at
+   * zero intensity instead, and the count never moves.
+   */
   _initLights() {
     this.lights = [];
     for (let i = 0; i < 5; i++) {
       const l = new THREE.PointLight(0xffaa55, 0, 24, 2);
-      l.visible = false;
       this.group.add(l);
       this.lights.push({ light: l, life: 0, max: 1, peak: 0 });
     }
@@ -246,7 +261,6 @@ export class Effects {
     e.light.color.setHex(color);
     e.light.distance = distance;
     e.light.intensity = intensity;
-    e.light.visible = true;
     e.peak = intensity;
     e.life = e.max = life;
   }
@@ -360,6 +374,34 @@ export class Effects {
     });
   }
 
+  /**
+   * Fires one of everything at zero opacity so the driver builds each pipeline
+   * now rather than on the frame it is first needed. Linking a shader is not
+   * the whole cost — drivers also defer work to the first draw that uses a
+   * given state — so this has to actually rasterise, which is why the burst is
+   * emitted at the camera with nothing visible in it.
+   */
+  warmUp(pos) {
+    const at = _v2.copy(pos);
+    // Long enough to survive several frames: a burst that expires inside the
+    // first update is never drawn, and then it has warmed nothing.
+    const LIFE = 0.7;
+    for (const tex of Object.keys(this.bbTex)) {
+      for (const additive of [true, false]) {
+        this.billboard(tex, at, { life: LIFE, s0: 0.5, s1: 0.5, opacity: 0, additive });
+      }
+    }
+    for (const kind of Object.keys(this.decalTex)) {
+      this.decal(kind, at, UP, 0.25, LIFE);
+      const d = this.decals[this._decalIdx];
+      d.fade = 1e6;                       // holds it at an opacity of nothing
+      d.mesh.material.opacity = 0;
+    }
+    this.tracer(at, _v.copy(at).addScaledVector(UP, 40), { opacity: 0, width: 0.002, speed: 60 });
+    this.spark(at, UP, 6, { c0: 0x000000, c1: 0x000000, speed: 0.01, life: LIFE, size: 2 });
+    this.flashLight(at, 0xffffff, 0.001, 0.5, LIFE);
+  }
+
   /* ── frame ─────────────────────────────────────────────────────────────── */
   update(dt, camera) {
     this.time += dt;
@@ -436,7 +478,7 @@ export class Effects {
     for (const e of this.lights) {
       if (e.life <= 0) continue;
       e.life -= dt;
-      if (e.life <= 0) { e.light.visible = false; e.light.intensity = 0; continue; }
+      if (e.life <= 0) { e.light.intensity = 0; continue; }
       const k = e.life / e.max;
       e.light.intensity = e.peak * k * k;
     }
@@ -447,7 +489,7 @@ export class Effects {
     for (const b of this.bbs) { b.life = 0; b.mesh.visible = false; }
     for (const d of this.decals) { d.life = 0; d.mesh.visible = false; }
     for (const t of this.tracers) { t.life = 0; t.mesh.visible = false; }
-    for (const l of this.lights) { l.life = 0; l.light.visible = false; l.light.intensity = 0; }
+    for (const l of this.lights) { l.life = 0; l.light.intensity = 0; }
     this.sparkPoints.geometry.attributes.size.array.fill(0);
     this.sparkPoints.geometry.attributes.size.needsUpdate = true;
   }

@@ -371,8 +371,21 @@ export class Character {
     this.weaponKind = kind;
     if (this.weaponModel) this.weaponMount.remove(this.weaponModel);
     this.weaponModel = buildWorldWeaponModel(kind);
+    // Anything built after setLayer has to be told as well, or the first
+    // weapon the player switches to comes back onto the camera's layer and is
+    // drawn in world space on top of the first-person one.
+    if (this.layer !== undefined) this.weaponModel.traverse((o) => o.layers.set(this.layer));
     this.weaponMount.add(this.weaponModel);
     this.muzzleLocal = this.weaponModel.userData.muzzle.clone();
+  }
+
+  /**
+   * Puts the whole operator on one render layer, and keeps it there: the
+   * layer is remembered so parts built later (a swapped weapon) join it too.
+   */
+  setLayer(layer) {
+    this.layer = layer;
+    this.root.traverse((o) => o.layers.set(layer));
   }
 
   _buildMuzzleFlash() {

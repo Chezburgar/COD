@@ -146,7 +146,7 @@ export class Game {
     c.character.setWeapon(WEAPONS[c.weaponIds[c.slot]].model);
     if (localBody) {
       // Own body stays out of the first-person view but keeps casting shadows.
-      c.character.root.traverse((o) => o.layers.set(LOCAL_BODY_LAYER));
+      c.character.setLayer(LOCAL_BODY_LAYER);
     }
     return c;
   }
@@ -216,7 +216,10 @@ export class Game {
 
   spawn(c, initial = false) {
     const s = this.pickSpawn(c);
-    c.pos.set(s.x, this.world.groundHeight(s.x, s.z) + 0.02, s.z);
+    // Search down from just above the spawn's own level, not from the sky:
+    // on a map with towers over it, the first floor found from up there is a
+    // roof.
+    c.pos.set(s.x, this.world.groundHeight(s.x, s.z, s.y + 1.2) + 0.02, s.z);
     c.vel.set(0, 0, 0);
     c.yaw = s.yaw;
     c.pitch = 0;
@@ -351,6 +354,8 @@ export class Game {
     const inside = this.map.indoorVolumes.some((b) => b.containsPoint(cam.position));
     if (inside !== this.indoor) { this.indoor = inside; this.audio.setSpace(inside); }
     this.renderer.focusShadows(cam.position);
+    // Only the lamps near the camera are real ones; the rig follows it.
+    this.map.lampRig?.update(cam.position);
 
     /* ── UAV reveal ──────────────────────────────────────────────── */
     this.updateVisibility(now);

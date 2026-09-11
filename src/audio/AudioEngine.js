@@ -406,7 +406,7 @@ export class AudioEngine {
     const g = this.ctx.createGain(); g.gain.value = 0;
     s.connect(g).connect(this.sfxBus);
     s.start();
-    g.gain.setTargetAtTime(0.34, this.ctx.currentTime, 1.4);
+    g.gain.setTargetAtTime(0.24, this.ctx.currentTime, 1.4);
     this._ambienceSrc = { s, g };
   }
 

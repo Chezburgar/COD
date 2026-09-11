@@ -100,6 +100,17 @@ function normalize(ch, peak = 0.92) {
   for (let i = 0; i < ch.length; i++) ch[i] *= g;
 }
 
+/** Scales a buffer to a target RMS — the right control for layering beds,
+    where peak normalisation just hands the loudest band the whole budget. */
+function setRms(ch, target) {
+  let s = 0;
+  for (let i = 0; i < ch.length; i++) s += ch[i] * ch[i];
+  const r = Math.sqrt(s / ch.length);
+  if (r < 1e-9) return;
+  const g = target / r;
+  for (let i = 0; i < ch.length; i++) ch[i] *= g;
+}
+
 /** Fades the last `ms` to zero so buffers never click on release. */
 function fadeOut(ch, ms = 6) {
   const n = Math.min(ch.length, (ms * SR) / 1000) | 0;
@@ -537,22 +548,50 @@ export function renderTinnitus(ctx, len = 4) {
   return buf;
 }
 
-/** Looping outdoor bed: wind, distant traffic-ish rumble, sparse far-off fire. */
+/**
+ * Room tone for a match. Deliberately not a wind bed: mid-band noise under a
+ * slow gain swell is how you synthesise surf, and that is what the old one
+ * sounded like. This has only the two bands a built-up place actually gives
+ * you — plant rumble below ~100Hz and thin air above ~2.5kHz — and leaves
+ * 250-1000Hz, where breaking water lives, almost empty. What movement there is
+ * drifts across the whole loop at a few per cent, so there is no rhythm in it
+ * to latch onto.
+ */
 export function renderAmbience(ctx, len = 12) {
   const n = Math.ceil(len * SR);
   const buf = makeBuffer(ctx, len, 2);
   for (let c = 0; c < 2; c++) {
     const ch = buf.getChannelData(c);
-    noise(ch, 0, n, 0.35);
-    lowpass(ch, 620);
-    highpass(ch, 45);
-    // Slow gusts.
-    const gust = new Float32Array(n);
-    valueNoise(gust, SR * 1.4, 1);
-    for (let i = 0; i < n; i++) ch[i] *= 0.45 + 0.55 * (0.5 + 0.5 * gust[i]);
-    // Low rumble bed.
-    let ph = 0;
-    for (let i = 0; i < n; i++) { ph += (2 * Math.PI * 46) / SR; ch[i] += Math.sin(ph) * 0.03; }
+
+    // Plant and distant traffic. Kept above 55Hz: below that a laptop plays
+    // nothing and a subwoofer plays everything, and neither is the intent.
+    noise(ch, 0, n, 0.5);
+    lowpass(ch, 200);
+    lowpass(ch, 200);
+    highpass(ch, 55);
+    setRms(ch, 0.042);
+
+    // Air, high and thin so it reads as a room rather than as water.
+    const air = new Float32Array(n);
+    noise(air, 0, n, 0.5);
+    highpass(air, 2600);
+    lowpass(air, 7500);
+    setRms(air, 0.015);
+    for (let i = 0; i < n; i++) ch[i] += air[i];
+
+    // Mains hum, on an exact number of cycles per loop so the seam is silent.
+    const hum = Math.round(100 * len) / len;
+    let ph = c * 0.6;
+    for (let i = 0; i < n; i++) {
+      ph += (2 * Math.PI * hum) / SR;
+      ch[i] += (Math.sin(ph) + 0.28 * Math.sin(ph * 3)) * 0.006;
+    }
+
+    // Drift, not gusts: one slow breath across the loop, and shallow.
+    const drift = new Float32Array(n);
+    valueNoise(drift, SR * 9, 1);
+    for (let i = 0; i < n; i++) ch[i] *= 0.93 + 0.07 * (0.5 + 0.5 * drift[i]);
+
     // Cross-fade the ends so the loop is seamless.
     const x = (SR * 1.5) | 0;
     for (let i = 0; i < x; i++) {
@@ -560,7 +599,6 @@ export function renderAmbience(ctx, len = 12) {
       const a = ch[n - x + i], b = ch[i];
       ch[n - x + i] = a * (1 - k) + b * k;
     }
-    normalize(ch, 0.32);
   }
   return buf;
 }

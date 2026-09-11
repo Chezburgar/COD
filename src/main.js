@@ -206,6 +206,11 @@ function beginMatch() {
   hud.setPing(net.role ? '— ms' : 'OFFLINE');
   audio.stopMenuBed();
   game.start(player);
+  // Pay for every shader and pipeline here rather than on the frame a grenade
+  // goes off: compile what the scene needs, then draw one invisible frame of
+  // every effect so the driver has nothing left to defer.
+  renderer.precompile();
+  game.effects.warmUp(renderer.camera.position);
   hud.setStreakTray([]);
   input.requestLock();
   hud.toast(`${game.map.name} · Team Deathmatch · first to ${game.scoreLimit}`);

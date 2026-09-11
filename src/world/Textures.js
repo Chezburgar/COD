@@ -119,6 +119,9 @@ const SURFACE_RELIEF = {
   concrete: [2.6, 0.74], asphalt: [3.4, 0.66], sand: [2.2, 0.84], metal: [4.4, 0.5],
   container: [4.8, 0.52], wood: [3.0, 0.7], sandbag: [4.2, 0.8], grid: [5.5, 0.58],
   plaster: [2.4, 0.78],
+  curtainwall: [3.2, 0.16], glass: [0.6, 0.08], stone: [3.4, 0.72], precast: [3.0, 0.7],
+  marble: [1.2, 0.3], tile: [2.2, 0.5], brick: [3.8, 0.8], grass: [2.0, 0.92],
+  bark: [4.0, 0.9],
 };
 
 export function texNormal(kind, aniso = 8) {
@@ -261,6 +264,146 @@ export function tex(kind, aniso = 8) {
       blotches(ctx, size, 10, rng, '96,88,74', 6 * k, 22 * k, 0.3);
       streaks(ctx, size, 16, rng, '104,94,76', 0.3);
       grain(ctx, size, 18, rng);
+      break;
+    }
+    // ── city surfaces (Skyline Sanctuary) ──────────────────────────────────
+    case 'curtainwall': { // storey-height glazing in an aluminium grid
+      ctx.fillStyle = '#3d4c57'; ctx.fillRect(0, 0, size, size);
+      // Sky reflected down the pane: bright at the head, dark at the sill.
+      const sky = ctx.createLinearGradient(0, 0, 0, size);
+      sky.addColorStop(0, 'rgba(150,186,214,.55)');
+      sky.addColorStop(0.45, 'rgba(84,112,136,.3)');
+      sky.addColorStop(1, 'rgba(26,34,42,.45)');
+      ctx.fillStyle = sky; ctx.fillRect(0, 0, size, size);
+      blotches(ctx, size, 12, rng, '190,214,232', 18 * k, 60 * k, 0.12);
+      // Mullions and transoms.
+      ctx.strokeStyle = 'rgba(176,182,188,.85)'; ctx.lineWidth = 5 * k;
+      for (let i = 0; i <= size; i += size / 4) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, size); ctx.stroke();
+      }
+      for (let i = 0; i <= size; i += size / 2) {
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(28,34,40,.5)'; ctx.lineWidth = 1.5 * k;
+      for (let i = 0; i <= size; i += size / 4) {
+        ctx.beginPath(); ctx.moveTo(i + 3 * k, 0); ctx.lineTo(i + 3 * k, size); ctx.stroke();
+      }
+      grain(ctx, size, 8, rng);
+      break;
+    }
+    case 'glass': {
+      ctx.fillStyle = '#6f8a9c'; ctx.fillRect(0, 0, size, size);
+      const g2 = ctx.createLinearGradient(0, 0, size, size);
+      g2.addColorStop(0, 'rgba(216,234,246,.45)');
+      g2.addColorStop(0.5, 'rgba(120,150,170,.15)');
+      g2.addColorStop(1, 'rgba(224,240,250,.4)');
+      ctx.fillStyle = g2; ctx.fillRect(0, 0, size, size);
+      grain(ctx, size, 6, rng);
+      break;
+    }
+    case 'stone': { // coursed ashlar
+      ctx.fillStyle = '#9d968a'; ctx.fillRect(0, 0, size, size);
+      blotches(ctx, size, 30, rng, '126,120,110', 14 * k, 52 * k, 0.24);
+      blotches(ctx, size, 16, rng, '186,180,170', 10 * k, 34 * k, 0.2);
+      const course = size / 4;
+      ctx.strokeStyle = 'rgba(78,74,68,.55)'; ctx.lineWidth = 3 * k;
+      for (let row = 0; row <= 4; row++) {
+        const y = row * course;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size, y); ctx.stroke();
+        // Perpends, offset every other course so it reads as bonded stone.
+        const off = (row % 2) * course;
+        for (let x = off; x < size; x += course * 2) {
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + course); ctx.stroke();
+        }
+      }
+      streaks(ctx, size, 10, rng, '84,80,72', 0.18);
+      grain(ctx, size, 20, rng);
+      break;
+    }
+    case 'precast': { // ribbed precast concrete panel
+      ctx.fillStyle = '#b4b0a8'; ctx.fillRect(0, 0, size, size);
+      blotches(ctx, size, 18, rng, '138,134,126', 16 * k, 50 * k, 0.2);
+      ctx.strokeStyle = 'rgba(92,90,84,.4)'; ctx.lineWidth = 4 * k;
+      for (let i = 0; i < size; i += 16 * k) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, size); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(214,210,202,.3)'; ctx.lineWidth = 2 * k;
+      for (let i = 0; i < size; i += 16 * k) {
+        ctx.beginPath(); ctx.moveTo(i + 5 * k, 0); ctx.lineTo(i + 5 * k, size); ctx.stroke();
+      }
+      streaks(ctx, size, 12, rng, '96,94,88', 0.22);
+      grain(ctx, size, 16, rng);
+      break;
+    }
+    case 'marble': {
+      ctx.fillStyle = '#ddd8ce'; ctx.fillRect(0, 0, size, size);
+      blotches(ctx, size, 14, rng, '198,192,182', 24 * k, 70 * k, 0.3);
+      // Veining.
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 18; i++) {
+        ctx.strokeStyle = `rgba(120,116,110,${0.1 + rng() * 0.16})`;
+        ctx.lineWidth = (0.6 + rng() * 1.6) * k;
+        let x = rng() * size, y = rng() * size;
+        ctx.beginPath(); ctx.moveTo(x, y);
+        for (let j = 0; j < 8; j++) {
+          x += (rng() - 0.5) * 70 * k; y += (rng() - 0.35) * 60 * k;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(150,146,138,.3)'; ctx.lineWidth = 2 * k;
+      for (const p of [0, size / 2]) {
+        ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
+      }
+      grain(ctx, size, 10, rng);
+      break;
+    }
+    case 'tile': {
+      ctx.fillStyle = '#a8a59e'; ctx.fillRect(0, 0, size, size);
+      const cell = size / 8;
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const v = 150 + rng() * 44;
+          ctx.fillStyle = `rgb(${v | 0},${(v * 0.99) | 0},${(v * 0.94) | 0})`;
+          ctx.fillRect(x * cell + 1.5 * k, y * cell + 1.5 * k, cell - 3 * k, cell - 3 * k);
+        }
+      }
+      streaks(ctx, size, 8, rng, '96,94,88', 0.14);
+      grain(ctx, size, 14, rng);
+      break;
+    }
+    case 'brick': {
+      ctx.fillStyle = '#6e4034'; ctx.fillRect(0, 0, size, size);
+      const bh = size / 8, bw = size / 4;
+      for (let row = 0; row < 8; row++) {
+        const off = (row % 2) * (bw / 2);
+        for (let x = -bw; x < size + bw; x += bw) {
+          const v = 96 + rng() * 54;
+          ctx.fillStyle = `rgb(${v | 0},${(v * 0.6) | 0},${(v * 0.48) | 0})`;
+          ctx.fillRect(x + off + 2 * k, row * bh + 2 * k, bw - 4 * k, bh - 4 * k);
+        }
+      }
+      streaks(ctx, size, 10, rng, '60,52,46', 0.2);
+      grain(ctx, size, 20, rng);
+      break;
+    }
+    case 'grass': {
+      ctx.fillStyle = '#4e5f3a'; ctx.fillRect(0, 0, size, size);
+      blotches(ctx, size, 44, rng, '86,104,60', 8 * k, 30 * k, 0.4);
+      blotches(ctx, size, 24, rng, '52,64,38', 6 * k, 22 * k, 0.35);
+      grain(ctx, size, 40, rng);
+      break;
+    }
+    case 'bark': {
+      ctx.fillStyle = '#544636'; ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(34,28,22,.5)'; ctx.lineWidth = 3 * k;
+      for (let i = 0; i < 40; i++) {
+        const x = rng() * size;
+        ctx.beginPath(); ctx.moveTo(x, 0);
+        for (let y = 0; y < size; y += 24 * k) ctx.lineTo(x + (rng() - 0.5) * 10 * k, y);
+        ctx.stroke();
+      }
+      grain(ctx, size, 26, rng);
       break;
     }
     default: {

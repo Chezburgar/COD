@@ -14,7 +14,22 @@ const CELL = 1.0;
 const STAND_CLEARANCE = 1.85;
 const STEP_UP = 0.62;
 const MAX_SLOPE_STEP = 1.3;
-const MAX_LAYERS = 4;
+// A four-storey tower over a metro concourse stacks six standing surfaces in
+// one column before any landing is counted, and a cap of four silently dropped
+// the upper floors — they became islands no bot could reach.
+const MAX_LAYERS = 8;
+// Weighted A*: over-estimating the remaining distance makes the search greedy,
+// which costs a little path optimality and saves a great deal of searching. On
+// a map this size an admissible heuristic explored tens of thousands of nodes
+// to cross the city; at 1.6 it is a few thousand, and a bot cannot tell the
+// difference between the route it gets and the perfect one.
+const H_WEIGHT = 1.6;
+/** Standing heights within a step of each other are one surface, not two:
+    the walker steps between them without noticing. */
+const SURFACE_MERGE = STEP_UP;
+/** Candidate heights are rounded into 5cm buckets, so "the same level" has to
+    mean anything inside that bucket's own error, not an exact match. */
+const LEVEL_EPS = 0.08;
 
 export class NavGrid {
   constructor(collision, bounds) {
@@ -55,8 +70,21 @@ export class NavGrid {
           cands.add(Math.round(b.topAt(x, z) * 20) / 20);
         }
 
+        // Surfaces within a step of each other are one surface to a walker —
+        // a road slab, the pavement patch over it and a threshold are three
+        // candidates a decimetre apart. Left separate they filled the layer
+        // budget for the column and the real floors above never got a cell, so
+        // each cluster collapses to the one you would actually be standing on:
+        // the top of it.
+        const levels = [];
+        for (const y of [...cands].sort((a, c) => c - a)) {
+          if (levels.length && levels[levels.length - 1] - y < SURFACE_MERGE) continue;
+          levels.push(y);
+        }
+        levels.reverse();
+
         const layers = [];
-        for (const y of [...cands].sort((a, c) => a - c)) {
+        for (const y of levels) {
           if (y < -1) continue;
           let clearance = Infinity;
           for (const b of solids) {
@@ -69,7 +97,20 @@ export class NavGrid {
             }
             if (b.max.x <= x - 0.45 || b.min.x >= x + 0.45 || b.max.z <= z - 0.45 || b.min.z >= z + 0.45) continue;
             if (b.min.y >= y + 0.12) clearance = Math.min(clearance, b.min.y - y);
-            else if (b.max.y > y + 0.12) { clearance = 0; break; }            // we're inside it
+            // Anything standing on this surface but no taller than a step is a
+            // kerb, not a ceiling: the walker goes over it. Treating those as
+            // blocking put a nav wall along every pavement edge in the city,
+            // because a kerb overlapping a cell's box need not contain the
+            // cell's centre — it deleted the cell without replacing it.
+            else if (b.max.y > y + STEP_UP) { clearance = 0; break; }
+            // Buried: the surface runs through the middle of a brush that
+            // covers this cell, so standing on it means standing inside that
+            // brush — and the depenetration then throws the walker out at the
+            // brush's nearest face, which on a road slab is ninety metres away.
+            // A kerb alongside fails this: it does not cover the cell centre.
+            else if (b.max.y > y + LEVEL_EPS && b.min.y < y - LEVEL_EPS && b.containsXZ(x, z)) {
+              clearance = 0; break;
+            }
           }
           if (clearance >= STAND_CLEARANCE) {
             layers.push({ id: this.nodes.length, ix, iz, x, z, y, links: [], cost: 1 });
@@ -199,7 +240,7 @@ export class NavGrid {
    * A* between two world positions. Returns smoothed waypoints, or null.
    * `budget` caps expansions so a hopeless request can't stall a frame.
    */
-  findPath(from, to, budget = 4500) {
+  findPath(from, to, budget = 6000) {
     const s = this.nearest(from), g = this.nearest(to);
     if (!s || !g) return null;
     if (s === g) return [new THREE.Vector3(g.x, g.y, g.z)];
@@ -290,7 +331,7 @@ export class NavGrid {
 
   _h(a, b) {
     const dx = a.x - b.x, dz = a.z - b.z, dy = a.y - b.y;
-    return Math.sqrt(dx * dx + dz * dz) + Math.abs(dy) * 1.4;
+    return (Math.sqrt(dx * dx + dz * dz) + Math.abs(dy) * 1.4) * H_WEIGHT;
   }
 
   _reconstruct(node) {

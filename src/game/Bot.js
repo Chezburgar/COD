@@ -418,6 +418,7 @@ export class Bot extends Combatant {
       let bestP = null, bestS = -Infinity;
       for (let i = 0; i < 10; i++) {
         const cp = pick(coverPoints);
+        if (!cp) break;
         const d = this.pos.distanceTo(_v.set(cp.x, this.pos.y, cp.z));
         if (d > 34) continue;
         const cn = nav.nearest(_v.set(cp.x, this.pos.y, cp.z), 3);
@@ -427,7 +428,10 @@ export class Bot extends Combatant {
         if (s > bestS) { bestS = s; bestP = cp; }
       }
       if (bestP) {
-        this.goal.set(bestP.x, world.groundHeight(bestP.x, bestP.z), bestP.z);
+        // Search down from the cover point's own level. From the default
+        // start height the first floor found on a map with towers over it is
+        // a roof, and the bot walks at a goal four storeys above itself.
+        this.goal.set(bestP.x, world.groundHeight(bestP.x, bestP.z, bestP.y + 0.6), bestP.z);
         this.hasGoal = true;
         this.goalExpire = now + 8;
         this.path = null;
@@ -455,6 +459,7 @@ export class Bot extends Combatant {
       let bestNode = null, bestS = -Infinity;
       for (let i = 0; i < 14; i++) {
         const n = nav.randomNode(Math.random, island);
+        if (!n) break;                     // nothing walkable to head for
         const d = this.pos.distanceTo(_v.set(n.x, n.y, n.z));
         if (d < 9 || d > 62) continue;
         let s = -Math.abs(d - 28) * 0.5;
