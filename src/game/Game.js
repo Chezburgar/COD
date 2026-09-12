@@ -57,7 +57,7 @@ export class Game {
     this.timeLimit = 600;
     this.clock = 600;
     this.difficulty = 1;
-    this.teamSize = 5;
+    this.teamSize = 8;
     this.on = {};              // event hooks wired up by main.js
     this.uavUntil = [0, 0];
     this.killEvents = [];
@@ -84,7 +84,7 @@ export class Game {
 
   /* ══ setup ═══════════════════════════════════════════════════════════════ */
 
-  configure({ teamSize = 5, scoreLimit = 75, timeLimit = 600, difficulty = 1, mode = 'host' }) {
+  configure({ teamSize = 8, scoreLimit = 75, timeLimit = 600, difficulty = 1, mode = 'host' }) {
     this.teamSize = teamSize;
     this.scoreLimit = scoreLimit;
     this.timeLimit = timeLimit;

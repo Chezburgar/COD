@@ -7,10 +7,10 @@
 <meta name="description" content="Operation Crossfire — a 5v5 online team deathmatch FPS that runs in your browser." />
 <title>Operation Crossfire — 5v5 Team Deathmatch</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0d0f'/%3E%3Cpath d='M16 4v24M4 16h24' stroke='%23ff9d3c' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23ff9d3c' stroke-width='2'/%3E%3C/svg%3E" />
-  <script type="module" crossorigin src="./assets/index-C9nQY0eW.js"></script>
+  <script type="module" crossorigin src="./assets/index-C0O47XNp.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/three-Cb5FQvb_.js">
   <link rel="modulepreload" crossorigin href="./assets/net-B_8Eti34.js">
-  <link rel="stylesheet" crossorigin href="./assets/index-CyvQ49O3.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-D-c9X4w0.css">
 </head>
 <body>
 <canvas id="viewport"></canvas>
@@ -39,7 +39,11 @@
       <div class="profile">
         <div class="rank"><span id="rank-level">1</span></div>
         <div class="profile-meta">
-          <input id="callsign" maxlength="14" spellcheck="false" autocomplete="off" aria-label="Callsign" />
+          <label class="callsign-field" for="callsign">
+            <span>Callsign</span>
+            <input id="callsign" maxlength="14" spellcheck="false" autocomplete="off"
+                   placeholder="Your name" aria-label="Callsign" />
+          </label>
           <div class="xpbar"><i id="xp-fill"></i></div>
           <small id="xp-label">0 / 1000 XP</small>
         </div>
@@ -80,8 +84,10 @@
           <select id="opt-teamsize">
             <option value="3">3v3</option>
             <option value="4">4v4</option>
-            <option value="5" selected>5v5</option>
+            <option value="5">5v5</option>
             <option value="6">6v6</option>
+            <option value="7">7v7</option>
+            <option value="8" selected>8v8</option>
           </select>
         </label>
         <label>Score limit

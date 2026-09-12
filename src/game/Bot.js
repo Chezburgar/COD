@@ -14,11 +14,20 @@ import { Combatant, BTN, MOVE } from './Combatant.js';
 import { WEAPONS, THROWABLES } from './Weapons.js';
 import { clamp, clamp01, damp, dampAngle, angleDelta, lerp, rand, randInt, pick, gaussian, TAU } from '../core/MathUtils.js';
 
+/**
+ * `aimSpeed` is how eagerly a bot eases onto its target; `turn` is the ceiling
+ * on how fast it may actually rotate, in radians per second. Both are needed.
+ * An exponential ease has no speed limit of its own — the further off the
+ * target, the faster it moves — so a contact appearing behind a bot produced a
+ * turn of some two thousand degrees a second, which reads as a bot spinning on
+ * the spot rather than turning round. The fastest here is about 320 deg/s,
+ * which is a hard flick for a person and still looks like one.
+ */
 export const DIFFICULTY = [
-  { name: 'Recruit',  react: 0.62, aimErr: 3.4, aimSpeed: 4.5,  fov: 1.5, sight: 46, burstMiss: 0.5,  grenade: 0.1, strafe: 0.3, headshot: 0.05, retreatHp: 22 },
-  { name: 'Regular',  react: 0.38, aimErr: 2.0, aimSpeed: 7.0,  fov: 1.7, sight: 62, burstMiss: 0.32, grenade: 0.3, strafe: 0.55, headshot: 0.12, retreatHp: 30 },
-  { name: 'Hardened', react: 0.24, aimErr: 1.25, aimSpeed: 9.5, fov: 1.9, sight: 78, burstMiss: 0.2,  grenade: 0.5, strafe: 0.8, headshot: 0.22, retreatHp: 36 },
-  { name: 'Veteran',  react: 0.15, aimErr: 0.75, aimSpeed: 13.0, fov: 2.1, sight: 95, burstMiss: 0.12, grenade: 0.7, strafe: 1.0, headshot: 0.34, retreatHp: 42 },
+  { name: 'Recruit',  react: 0.62, aimErr: 4.2,  aimSpeed: 4.5,  turn: 2.2, fov: 1.5, sight: 46, burstMiss: 0.5,  grenade: 0.1, strafe: 0.3,  headshot: 0.03, retreatHp: 22 },
+  { name: 'Regular',  react: 0.38, aimErr: 2.8,  aimSpeed: 7.0,  turn: 3.2, fov: 1.7, sight: 62, burstMiss: 0.32, grenade: 0.3, strafe: 0.55, headshot: 0.08, retreatHp: 30 },
+  { name: 'Hardened', react: 0.24, aimErr: 1.9,  aimSpeed: 9.5,  turn: 4.4, fov: 1.9, sight: 78, burstMiss: 0.2,  grenade: 0.5, strafe: 0.8,  headshot: 0.15, retreatHp: 36 },
+  { name: 'Veteran',  react: 0.15, aimErr: 1.3,  aimSpeed: 13.0, turn: 5.6, fov: 2.1, sight: 95, burstMiss: 0.12, grenade: 0.7, strafe: 1.0,  headshot: 0.22, retreatHp: 42 },
 ];
 
 const CALLSIGNS = [
@@ -245,9 +254,14 @@ export class Bot extends Combatant {
       this.aimErrorTime -= dt;
       if (this.aimErrorTime <= 0) {
         this.aimErrorTime = rand(0.18, 0.5);
-        const settle = lerp(1.6, 0.45, clamp01(this.trackTime / 1.6));
+        // Tracking tightens the aim but never perfects it: settling to nearly
+        // zero is what made a bot that had held you for a second unmissable.
+        const settle = lerp(1.9, 0.8, clamp01(this.trackTime / 1.6));
         const moveErr = 1 + clamp01(Math.hypot(t.vel.x, t.vel.z) / 6) * 0.7;
-        const mag = (this.skill.aimErr * this.flair.aim * settle * moveErr * Math.PI) / 180;
+        // A shot across the plaza is harder than one across a room, which a
+        // constant angular error does not capture.
+        const rangeErr = 1 + clamp01((dist - 16) / 55) * 0.85;
+        const mag = (this.skill.aimErr * this.flair.aim * settle * moveErr * rangeErr * Math.PI) / 180;
         this.aimError.set(gaussian() * mag, gaussian() * mag * 0.7);
       }
       desiredYaw += this.aimError.x;
@@ -260,7 +274,7 @@ export class Bot extends Combatant {
       /* ── trigger discipline ───────────────────────────────────── */
       const aimOff = Math.abs(angleDelta(this.yaw, desiredYaw)) + Math.abs(desiredPitch - this.pitch);
       const inRange = engageDist < (w.melee ? w.range : w.farRange * 1.25);
-      const onTarget = aimOff < lerp(0.14, 0.035, clamp01(this.trackTime));
+      const onTarget = aimOff < lerp(0.17, 0.07, clamp01(this.trackTime));
       if (inRange && onTarget && this.reloadUntil <= 0 && this.swapUntil <= 0) {
         if (w.melee) wantFire = engageDist < w.range;
         else if (w.fireMode === 'auto') {
@@ -372,10 +386,33 @@ export class Bot extends Combatant {
     }
     if (wantFire) buttons |= BTN.fire;
 
+    /* ── look where you are going ───────────────────────────────────── */
+    // Off contact a bot kept whatever heading it last had and side-stepped
+    // across the map, so every contact began with a full turn from the wrong
+    // direction — and it could never sprint, which needs the body pointed the
+    // way it is moving.
+    if (this.state !== STATE.ENGAGE && !this.target && wp) {
+      _v.copy(wp).sub(this.pos); _v.y = 0;
+      if (_v.lengthSq() > 1) {
+        const travel = Math.atan2(-_v.x, -_v.z);
+        // Hunting keeps its eyes on the last known position and only drifts
+        // toward the route; patrolling just faces the route.
+        desiredYaw = this.state === STATE.HUNT
+          ? dampAngle(desiredYaw, travel, 1.1, dt)
+          : travel;
+        if (this.state !== STATE.HUNT) desiredPitch = damp(desiredPitch, 0, 2, dt);
+      }
+    }
+
     /* ── smooth the aim into the command ────────────────────────────── */
-    const turn = this.skill.aimSpeed * (this.state === STATE.ENGAGE ? 1 : 0.55);
-    this.aimYaw = dampAngle(this.aimYaw, desiredYaw, turn, dt);
-    this.aimPitch = damp(this.aimPitch, desiredPitch, turn, dt);
+    // Ease toward the target, then clamp to a turn a person could make. The
+    // ease alone has no speed limit: its rate is proportional to how far off
+    // it is, so a target behind the bot was a snap, not a turn.
+    const ease = this.skill.aimSpeed * (this.state === STATE.ENGAGE ? 1 : 0.55);
+    const cap = this.skill.turn * (this.state === STATE.ENGAGE ? 1 : 0.7) * dt;
+    const k = 1 - Math.exp(-ease * dt);
+    this.aimYaw += clamp(angleDelta(this.aimYaw, desiredYaw) * k, -cap, cap);
+    this.aimPitch += clamp((desiredPitch - this.aimPitch) * k, -cap * 0.8, cap * 0.8);
     // Bots fight their own recoil, imperfectly.
     const comp = clamp01(1 - this.skill.aimErr / 4) * 0.6;
     this.aimPitch -= this.aimPunch.y * comp;

@@ -26,7 +26,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # TURN relay credentials, so players behind a symmetric NAT can connect
+      # at all. Set TURN_KEY as a repository secret to switch relays on; with
+      # the secret unset the build simply falls back to STUN.
       - run: npm run build
+        env:
+          VITE_TURN_KEY: ${{ secrets.TURN_KEY }}
 
       # Pages can be off, served from a branch, or served from a workflow, and
       # this job has something different to do in each case. Ask first rather

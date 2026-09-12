@@ -14,6 +14,30 @@ const PREFIX = 'ocxf-';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no I/O/0/1
 const SNAPSHOT_HZ = 20;
 
+// TURN relays, for the players whose networks refuse a direct connection: a
+// symmetric NAT has no route STUN alone can find, and without a relay those
+// players simply cannot join at all.
+//
+// Metered mints short-lived credentials per request from an API key. That key
+// reaches the browser either way, so it is not a secret in the usual sense —
+// but it is still an account credential with a metered bill behind it, so it
+// is not written down in the repository. Supply it at build time:
+//
+//   VITE_TURN_KEY=<key> npm run build
+//
+// and on GitHub Pages set it as a repository secret the workflow passes
+// through. With no key the game falls back to STUN, which is what it used
+// before this and is enough for most networks.
+const TURN_KEY = import.meta.env?.VITE_TURN_KEY ?? '';
+const TURN_HOST = import.meta.env?.VITE_TURN_HOST ?? 'frontlines.metered.live';
+const TURN_API = TURN_KEY
+  ? `https://${TURN_HOST}/api/v1/turn/credentials?apiKey=${encodeURIComponent(TURN_KEY)}`
+  : null;
+const STUN_ONLY = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+];
+
 export function makeRoomCode() {
   let s = '';
   for (let i = 0; i < 6; i++) s += ALPHABET[(Math.random() * ALPHABET.length) | 0];
@@ -43,9 +67,38 @@ export class Net {
 
   emit(name, ...a) { this.on[name]?.(...a); }
 
-  _newPeer(id) {
+  /**
+   * ICE servers for the connection. Credentials are short-lived, so they are
+   * fetched once per session and reused; if the service is unreachable this
+   * still returns STUN, which is what the game had before and is enough for
+   * most networks.
+   */
+  async _ice() {
+    if (this._icePromise) return this._icePromise;
+    this._icePromise = (async () => {
+      if (!TURN_API) return STUN_ONLY;
+      try {
+        const res = await fetch(TURN_API, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`turn ${res.status}`);
+        const servers = await res.json();
+        if (!Array.isArray(servers) || !servers.length) throw new Error('turn empty');
+        // Keep STUN alongside: a direct route is always cheaper than a relay,
+        // and ICE will prefer one when it can find it.
+        return [...STUN_ONLY, ...servers];
+      } catch (err) {
+        console.warn('TURN unavailable, falling back to STUN only', err);
+        return STUN_ONLY;
+      }
+    })();
+    return this._icePromise;
+  }
+
+  async _newPeer(id) {
+    const iceServers = await this._ice();
+    this.usingRelay = iceServers.length > STUN_ONLY.length;
+    const opts = { debug: 0, config: { iceServers } };
     return new Promise((resolve, reject) => {
-      const peer = id ? new Peer(id, { debug: 0 }) : new Peer({ debug: 0 });
+      const peer = id ? new Peer(id, opts) : new Peer(opts);
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;

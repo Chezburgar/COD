@@ -24,6 +24,8 @@ const CELL = 4;
 
 /** Share of the body radius that actually carries weight. */
 const FOOT_RADIUS = 0.55;
+/** Furthest a single axis resolution may shove a character sideways. */
+const MAX_PUSH = 2.0;
 const _v = new THREE.Vector3();
 
 export class Brush {
@@ -246,6 +248,20 @@ export class CollisionWorld {
         res.ceiling = true;
       }
     }
+
+    // Still inside something? Then this is a burial, not a collision: a gap
+    // between two decks, a spawn set a little low, a deck laid over another.
+    // Lift out onto the top of whatever contains us, which is where the
+    // character would have been standing in the first place.
+    if (this._overlaps(pos, radius, height, solids)) {
+      const top = this.floorAt(pos.x, pos.z, pos.y + height, feet, solids);
+      if (top !== null && top > pos.y && top - pos.y <= height) {
+        pos.y = top;
+        res.ground = true;
+        const fb = this._floorBrush;
+        if (fb) { res.groundMat = fb.mat; fb.topNormal(res.groundNormal); }
+      }
+    }
     return res;
   }
 
@@ -285,6 +301,12 @@ export class CollisionWorld {
       const hi = axis === 'x' ? b.max.x : b.max.z;
       const p = pos[axis];
       const out = moveDir > 0 ? lo - radius - p : hi + radius - p;
+      // Walking into a wall needs a push of at most your own width plus the
+      // step you just took. Anything bigger means you are *inside* the brush
+      // rather than against a face of it, and pushing on out to its far side
+      // then throws you the width of the brush — which on a road slab spanning
+      // the whole map is ninety metres. Leave those to the vertical recovery.
+      if (Math.abs(out) > MAX_PUSH) continue;
       if (Math.abs(out) > Math.abs(correction)) correction = out;
     }
     if (correction !== 0) pos[axis] += correction;

@@ -337,7 +337,7 @@ function renderRoster() {
       li.innerHTML = `<b>${escapeHtml(p.name)}</b>${p.bot ? '<span class="bot">BOT</span>' : ''}`;
       ul.appendChild(li);
     }
-    const size = lobby?.config?.teamSize ?? 5;
+    const size = lobby?.config?.teamSize ?? 8;
     for (let i = members.length; i < size; i++) {
       const li = document.createElement('li');
       li.innerHTML = '<b style="opacity:.35">— open slot —</b><span class="bot">FILLED BY BOT</span>';

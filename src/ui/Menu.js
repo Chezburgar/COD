@@ -81,12 +81,18 @@ export class Menu {
 
     const cs = $('#callsign');
     cs.value = this.profile.callsign;
-    cs.addEventListener('change', () => {
-      const v = cs.value.trim().slice(0, 14) || 'Operator';
-      cs.value = v;
-      this.profile.callsign = v;
+    // Saved as it is typed as well as on the way out: `change` alone loses a
+    // name typed and then left by any route that doesn't blur the field.
+    const commitName = (final) => {
+      const v = cs.value.trim().slice(0, 14);
+      if (final) cs.value = v || 'Operator';
+      this.profile.callsign = v || 'Operator';
       saveProfile(this.profile);
-    });
+    };
+    cs.addEventListener('input', () => commitName(false));
+    cs.addEventListener('change', () => commitName(true));
+    cs.addEventListener('blur', () => commitName(true));
+    cs.addEventListener('keydown', (e) => { if (e.key === 'Enter') cs.blur(); });
 
     for (const [id, key] of [['opt-teamsize', 'teamSize'], ['opt-scorelimit', 'scoreLimit'],
       ['opt-timelimit', 'timeLimit'], ['opt-difficulty', 'difficulty']]) {
