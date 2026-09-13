@@ -7,10 +7,10 @@
 <meta name="description" content="Operation Crossfire — a 5v5 online team deathmatch FPS that runs in your browser." />
 <title>Operation Crossfire — 5v5 Team Deathmatch</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0d0f'/%3E%3Cpath d='M16 4v24M4 16h24' stroke='%23ff9d3c' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23ff9d3c' stroke-width='2'/%3E%3C/svg%3E" />
-  <script type="module" crossorigin src="./assets/index-C0O47XNp.js"></script>
+  <script type="module" crossorigin src="./assets/index-jmcMRU8F.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/three-Cb5FQvb_.js">
   <link rel="modulepreload" crossorigin href="./assets/net-B_8Eti34.js">
-  <link rel="stylesheet" crossorigin href="./assets/index-D-c9X4w0.css">
+  <link rel="stylesheet" crossorigin href="./assets/index-Bwe4ddvx.css">
 </head>
 <body>
 <canvas id="viewport"></canvas>
@@ -80,6 +80,12 @@
       </div>
 
       <div class="matchopts">
+        <label class="opt-mode">Game mode
+          <select id="opt-mode">
+            <option value="tdm" selected>Team Deathmatch</option>
+            <option value="elim">Elimination — best of 5</option>
+          </select>
+        </label>
         <label>Team size
           <select id="opt-teamsize">
             <option value="3">3v3</option>
@@ -213,7 +219,13 @@
       <div class="team-score t1"><b id="score-1">0</b><span class="tname">VIPER</span></div>
     </div>
     <div class="score-bar"><i id="score-bar-0"></i><i id="score-bar-1"></i></div>
+    <div class="round-line hidden" id="round-line">
+      <span class="pips t0" id="round-pips-0"></span>
+      <span class="round-label" id="round-label">ROUND 1</span>
+      <span class="pips t1" id="round-pips-1"></span>
+    </div>
   </div>
+  <div id="round-banner" class="hidden"><b id="round-banner-title"></b><small id="round-banner-sub"></small></div>
 
   <div id="killfeed"></div>
   <div id="obituary"></div>

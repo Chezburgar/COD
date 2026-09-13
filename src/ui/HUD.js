@@ -34,6 +34,13 @@ export class HUD {
       bar0: $('#score-bar-0'),
       bar1: $('#score-bar-1'),
       clock: $('#match-clock'),
+      roundLine: $('#round-line'),
+      roundLabel: $('#round-label'),
+      pips0: $('#round-pips-0'),
+      pips1: $('#round-pips-1'),
+      roundBanner: $('#round-banner'),
+      roundBannerTitle: $('#round-banner-title'),
+      roundBannerSub: $('#round-banner-sub'),
       compass: $('#compass'),
       reloadPrompt: $('#reload-prompt'),
       pingBadge: $('#ping-badge'),
@@ -115,11 +122,16 @@ export class HUD {
     }
 
     /* score + clock */
-    const [s0, s1] = game.teamScores;
+    // In a round mode the number that matters is rounds taken, not kills —
+    // a team can be losing on kills and one round from the match.
+    const rounds = game.ruleset?.rounds;
+    const [s0, s1] = rounds ? game.roundWins : game.teamScores;
+    const limit = rounds ? game.ruleset.winRounds : game.scoreLimit;
     this.el.score0.textContent = s0;
     this.el.score1.textContent = s1;
-    this.el.bar0.style.width = `${clamp01(s0 / game.scoreLimit) * 50}%`;
-    this.el.bar1.style.width = `${clamp01(s1 / game.scoreLimit) * 50}%`;
+    this.el.bar0.style.width = `${clamp01(s0 / limit) * 50}%`;
+    this.el.bar1.style.width = `${clamp01(s1 / limit) * 50}%`;
+    this._syncRounds(game, rounds);
     const cl = Math.ceil(game.clock);
     if (cl !== this._lastClock) {
       this._lastClock = cl;
@@ -192,8 +204,11 @@ export class HUD {
 
     /* death countdown */
     if (!c.alive && game.state === 'live') {
-      const left = Math.max(0, Math.ceil(c.respawnAt - game.time));
-      this.el.respawnCount.textContent = left;
+      // In a round mode there is no respawn to count down to — you are out
+      // until the round is decided, so say that instead of a number.
+      this.el.respawnCount.textContent = rounds
+        ? 'ROUND'
+        : Math.max(0, Math.ceil(c.respawnAt - game.time));
     }
 
     /* killfeed ageing */
@@ -209,6 +224,49 @@ export class HUD {
   }
 
   /** Radius of the scope circle in normalised min-axis units, for the shader. */
+  /** Round pips and the round number, shown only when the mode has rounds. */
+  _syncRounds(game, rounds) {
+    const line = this.el.roundLine;
+    if (!line) return;
+    line.classList.toggle('hidden', !rounds);
+    if (!rounds) return;
+    const need = game.ruleset.winRounds;
+    if (this._pipCount !== need) {
+      this._pipCount = need;
+      for (const el of [this.el.pips0, this.el.pips1]) {
+        el.textContent = '';
+        for (let i = 0; i < need; i++) el.appendChild(document.createElement('i'));
+      }
+    }
+    for (const [el, won] of [[this.el.pips0, game.roundWins[0]], [this.el.pips1, game.roundWins[1]]]) {
+      el.childNodes.forEach((pip, i) => pip.classList.toggle('on', i < won));
+    }
+    const alive = `${game.aliveCount(0)} v ${game.aliveCount(1)}`;
+    const label = `ROUND ${game.round} · ${alive}`;
+    if (this._roundLabel !== label) { this._roundLabel = label; this.el.roundLabel.textContent = label; }
+  }
+
+  /** Big mid-screen call at the end of a round. */
+  roundEnd({ winner, wins, decisive, localTeam }) {
+    const b = this.el.roundBanner;
+    if (!b) return;
+    const won = winner === null ? null : winner === localTeam;
+    this.el.roundBannerTitle.textContent = winner === null ? 'ROUND DRAWN'
+      : won ? 'ROUND WON' : 'ROUND LOST';
+    this.el.roundBannerSub.textContent = decisive ? 'MATCH POINT TAKEN' : `${wins[0]} — ${wins[1]}`;
+    b.classList.remove('hidden', 'win', 'lose', 'show');
+    if (won !== null) b.classList.add(won ? 'win' : 'lose');
+    void b.offsetWidth;                       // restart the entry animation
+    b.classList.add('show');
+    clearTimeout(this._roundBannerT);
+    this._roundBannerT = setTimeout(() => b.classList.add('hidden'), 4200);
+  }
+
+  roundStart({ round }) {
+    this.el.roundBanner?.classList.add('hidden');
+    this.toast(`Round ${round}`);
+  }
+
   scopeRadius(weapon) { return weapon.scope?.radius ?? 0.38; }
 
   /* ── events ────────────────────────────────────────────────────────────── */

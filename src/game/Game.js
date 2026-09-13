@@ -23,6 +23,27 @@ export const TEAM_NAMES = ['Ghost', 'Viper'];
 const RESPAWN_TIME = 5;
 const LOCAL_BODY_LAYER = 2;
 
+/**
+ * What winning means. Deathmatch is a running score with respawns; elimination
+ * is a series of rounds where death is final until the round is decided, which
+ * is a different game entirely — every angle matters when it is the only life
+ * you have.
+ */
+export const RULESETS = {
+  tdm: {
+    id: 'tdm', name: 'Team Deathmatch', rounds: false,
+    desc: 'Respawn and keep pushing. First team to the score limit takes it.',
+  },
+  elim: {
+    id: 'elim', name: 'Elimination', rounds: true,
+    winRounds: 3,          // best of five
+    roundTime: 150,        // a round left undecided goes to whoever has more left
+    intermission: 5,       // breath between rounds
+    desc: 'Best of five, one life each round. No respawns until the round is decided.',
+  },
+};
+export const DEFAULT_RULESET = 'tdm';
+
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _dir = new THREE.Vector3();
@@ -53,6 +74,11 @@ export class Game {
     this.time = 0;
     this.state = 'idle';       // idle | live | ended
     this.teamScores = [0, 0];
+    this.ruleset = RULESETS[DEFAULT_RULESET];
+    this.roundWins = [0, 0];
+    this.round = 1;
+    this.roundPhase = 'live';  // live | over  (only meaningful in a round mode)
+    this.intermission = 0;
     this.scoreLimit = 75;
     this.timeLimit = 600;
     this.clock = 600;
@@ -84,13 +110,28 @@ export class Game {
 
   /* ══ setup ═══════════════════════════════════════════════════════════════ */
 
-  configure({ teamSize = 8, scoreLimit = 75, timeLimit = 600, difficulty = 1, mode = 'host' }) {
+  configure({ teamSize = 8, scoreLimit = 75, timeLimit = 600, difficulty = 1, mode = 'host',
+    ruleset = DEFAULT_RULESET }) {
     this.teamSize = teamSize;
     this.scoreLimit = scoreLimit;
-    this.timeLimit = timeLimit;
-    this.clock = timeLimit;
+    this.ruleset = RULESETS[ruleset] ?? RULESETS[DEFAULT_RULESET];
+    // A round mode runs on its own, much shorter clock — the lobby's time
+    // limit is the length of a deathmatch, not of a round.
+    this.timeLimit = this.ruleset.rounds ? this.ruleset.roundTime : timeLimit;
+    this.clock = this.timeLimit;
     this.difficulty = difficulty;
     this.mode = mode;
+  }
+
+  /** In a round mode the only way back is the next round, never a timer. */
+  get respawnsOpen() {
+    return this.state === 'live' && !this.ruleset.rounds;
+  }
+
+  aliveCount(team) {
+    let n = 0;
+    for (const c of this.combatants) if (c.team === team && c.alive) n++;
+    return n;
   }
 
   addLocalPlayer(name, team, loadout) {
@@ -173,6 +214,10 @@ export class Game {
     this.time = 0;
     this.clock = this.timeLimit;
     this.teamScores = [0, 0];
+    this.roundWins = [0, 0];
+    this.round = 1;
+    this.roundPhase = 'live';
+    this.intermission = 0;
     resetBotNames();
     for (const c of this.combatants) {
       c.kills = c.deaths = c.assists = c.score = c.streak = c.bestStreak = 0;
@@ -248,6 +293,77 @@ export class Game {
     if (c.isRemote) { c.netPos.copy(c.pos); c.renderPos.copy(c.pos); c.snapBuffer.length = 0; }
   }
 
+  /* ══ rounds ══════════════════════════════════════════════════════════════ */
+
+  /**
+   * Called after every death in a round mode. A round ends the moment one side
+   * has nobody left; the clock running out is handled separately.
+   */
+  _checkRoundOver() {
+    if (this.roundPhase !== 'live') return;
+    const alive = [this.aliveCount(0), this.aliveCount(1)];
+    if (alive[0] > 0 && alive[1] > 0) return;
+    if (alive[0] === 0 && alive[1] === 0) this._endRound(null);   // mutual, e.g. one grenade
+    else this._endRound(alive[0] > 0 ? 0 : 1);
+  }
+
+  /** Awards the round and either ends the match or queues the next one. */
+  _endRound(winner) {
+    if (this.roundPhase !== 'live') return;
+    this.roundPhase = 'over';
+    if (winner !== null) this.roundWins[winner]++;
+    this.intermission = this.ruleset.intermission;
+    const done = winner !== null && this.roundWins[winner] >= this.ruleset.winRounds;
+    this.emit('roundend', {
+      winner, round: this.round, wins: [...this.roundWins],
+      decisive: done, localTeam: this.local?.team ?? 0,
+    });
+    this.audio.play(winner === null ? 'streak'
+      : winner === (this.local?.team ?? 0) ? 'win' : 'lose', { bus: 'ui', volume: 0.6 });
+  }
+
+  /** Everyone back on their feet, fresh magazines, next round on the board. */
+  _beginRound() {
+    this.round++;
+    this.clock = this.ruleset.roundTime;
+    for (const c of this.combatants) {
+      c.streak = 0;
+      this.spawn(c, true);
+    }
+    // Only live once everyone is actually back on their feet, so there is no
+    // frame in which the round is running but the teams are still where they
+    // fell — and so "came back during a live round" means only one thing.
+    this.roundPhase = 'live';
+    this.projectiles.clear();
+    this.emit('roundstart', { round: this.round, wins: [...this.roundWins] });
+    this.audio.play('matchstart', { bus: 'ui', volume: 0.6 });
+  }
+
+  /** Advances the round clock and the gap between rounds. Host side only. */
+  _tickRounds(dt) {
+    if (this.state !== 'live') return;
+    if (this.roundPhase === 'live') {
+      // Checked every frame, not only on the kill path: a death that arrives
+      // by some other route — a fall, the world, a disconnect — would
+      // otherwise leave the round running against an empty team until the
+      // clock ran out.
+      this._checkRoundOver();
+      if (this.roundPhase !== 'live') return;
+      if (this.clock <= 0) {
+        // Time out: whoever has more left standing takes it, nobody on a tie.
+        const a = this.aliveCount(0), b = this.aliveCount(1);
+        this._endRound(a === b ? null : a > b ? 0 : 1);
+      }
+      return;
+    }
+    this.intermission -= dt;
+    if (this.intermission > 0) return;
+    const [a, b] = this.roundWins;
+    const need = this.ruleset.winRounds;
+    if (a >= need || b >= need) this.endMatch();
+    else this._beginRound();
+  }
+
   /* ══ frame ═══════════════════════════════════════════════════════════════ */
 
   update(dt) {
@@ -255,12 +371,19 @@ export class Game {
     // Everything downstream runs on the match clock so timers set from the UI
     // (killstreaks, respawns) and timers set inside the simulation agree.
     const now = this.time;
-    if (this.state === 'live') {
-      this.clock = Math.max(0, this.clock - dt);
-      if (this.clock <= 0) this.endMatch();
-    }
-
     const isHost = this.mode !== 'client';
+    if (this.state === 'live') {
+      // The round clock only runs while a round is being played; between them
+      // it holds at zero while the intermission counts down.
+      if (!this.ruleset.rounds || this.roundPhase === 'live') {
+        this.clock = Math.max(0, this.clock - dt);
+      }
+      if (this.ruleset.rounds) {
+        if (isHost) this._tickRounds(dt);
+      } else if (this.clock <= 0) {
+        this.endMatch();
+      }
+    }
 
     /* ── local player ────────────────────────────────────────────── */
     this.landImpulse = 0;
@@ -282,7 +405,7 @@ export class Game {
         this.player.updateThrowables(now);
         const req = this.player.takeThrowRequest();
         if (req) this.requestThrow(this.local, req.kind, req.cook, req.overcooked);
-      } else if (now >= this.local.respawnAt && this.state === 'live') {
+      } else if (now >= this.local.respawnAt && this.respawnsOpen) {
         this.spawn(this.local);
       }
       this.emit('command', cmd);
@@ -299,7 +422,7 @@ export class Game {
       if (c.isBot) {
         if (!isHost) { this.interpolateRemote(c, dt, now); continue; }
         if (!c.alive) {
-          if (now >= c.respawnAt && this.state === 'live') this.spawn(c);
+          if (now >= c.respawnAt && this.respawnsOpen) this.spawn(c);
           continue;
         }
         const cmd = c.think(dt, ctx);
@@ -323,7 +446,7 @@ export class Game {
             }
             c.lastAckSeq = cmd.seq;
           }
-          if (!c.alive && now >= c.respawnAt && this.state === 'live') this.spawn(c);
+          if (!c.alive && now >= c.respawnAt && this.respawnsOpen) this.spawn(c);
         } else {
           this.interpolateRemote(c, dt, now);
         }
@@ -809,8 +932,11 @@ export class Game {
       this.vm.hidden = true;
     }
 
-    if (this.state === 'live' &&
-        (this.teamScores[0] >= this.scoreLimit || this.teamScores[1] >= this.scoreLimit)) {
+    if (this.state !== 'live') return;
+    if (this.ruleset.rounds) {
+      // Only the host decides a round; a client is told by the next snapshot.
+      if (this.mode !== 'client') this._checkRoundOver();
+    } else if (this.teamScores[0] >= this.scoreLimit || this.teamScores[1] >= this.scoreLimit) {
       this.endMatch();
     }
   }
@@ -1010,6 +1136,16 @@ export class Game {
     this.teamScores = snap.sc;
     this.clock = snap.clk;
     if (snap.uav) this.uavUntil = snap.uav;
+    if (snap.rw) {
+      const changed = snap.rd !== this.round || snap.rw[0] !== this.roundWins[0] ||
+        snap.rw[1] !== this.roundWins[1];
+      this.roundWins = snap.rw;
+      this.round = snap.rd ?? this.round;
+      this.roundPhase = snap.rp ? 'live' : 'over';
+      if (changed && this.ruleset.rounds) {
+        this.emit('roundstart', { round: this.round, wins: [...this.roundWins] });
+      }
+    }
     this.emit('score', this.teamScores);
   }
 
@@ -1123,12 +1259,16 @@ export class Game {
   endMatch() {
     if (this.state === 'ended') return;
     this.state = 'ended';
-    const [a, b] = this.teamScores;
+    // A round mode is decided on rounds taken, not on the kill count.
+    const [a, b] = this.ruleset.rounds ? this.roundWins : this.teamScores;
     const localTeam = this.local?.team ?? 0;
     const won = a === b ? null : (a > b ? 0 : 1) === localTeam;
     this.audio.play(won === null ? 'streak' : won ? 'win' : 'lose', { bus: 'ui', volume: 0.8 });
     this.audio.stopAmbience();
-    this.emit('matchend', { scores: this.teamScores, won, local: this.local });
+    this.emit('matchend', {
+      scores: [a, b], kills: this.teamScores, won, local: this.local,
+      ruleset: this.ruleset,
+    });
   }
 
   teardown() {

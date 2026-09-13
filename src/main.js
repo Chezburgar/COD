@@ -213,7 +213,9 @@ function beginMatch() {
   game.effects.warmUp(renderer.camera.position);
   hud.setStreakTray([]);
   input.requestLock();
-  hud.toast(`${game.map.name} · Team Deathmatch · first to ${game.scoreLimit}`);
+  hud.toast(`${game.map.name} · ${game.ruleset.name} · ${game.ruleset.rounds
+    ? `first to ${game.ruleset.winRounds} rounds`
+    : `first to ${game.scoreLimit}`}`);
 }
 
 function wireGameEvents() {
@@ -236,6 +238,8 @@ function wireGameEvents() {
   game.on.died = (killer, weapon) => { hud.died(killer, weapon); input.buttons?.fill?.(false); };
   game.on.respawned = () => { hud.respawned(); viewModel.hidden = false; };
   game.on.flashed = (k, d) => hud.flashbang(k, d);
+  game.on.roundend = (ev) => hud.roundEnd(ev);
+  game.on.roundstart = (ev) => { hud.roundStart(ev); viewModel.hidden = false; };
   game.on.xp = (amount, reason) => {
     profile.xp += amount;
     sessionXp += amount;

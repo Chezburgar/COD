@@ -94,6 +94,12 @@
       </div>
 
       <div class="matchopts">
+        <label class="opt-mode">Game mode
+          <select id="opt-mode">
+            <option value="tdm" selected>Team Deathmatch</option>
+            <option value="elim">Elimination — best of 5</option>
+          </select>
+        </label>
         <label>Team size
           <select id="opt-teamsize">
             <option value="3">3v3</option>
@@ -227,7 +233,13 @@
       <div class="team-score t1"><b id="score-1">0</b><span class="tname">VIPER</span></div>
     </div>
     <div class="score-bar"><i id="score-bar-0"></i><i id="score-bar-1"></i></div>
+    <div class="round-line hidden" id="round-line">
+      <span class="pips t0" id="round-pips-0"></span>
+      <span class="round-label" id="round-label">ROUND 1</span>
+      <span class="pips t1" id="round-pips-1"></span>
+    </div>
   </div>
+  <div id="round-banner" class="hidden"><b id="round-banner-title"></b><small id="round-banner-sub"></small></div>
 
   <div id="killfeed"></div>
   <div id="obituary"></div>

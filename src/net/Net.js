@@ -230,6 +230,10 @@ export class Net {
       sc: game.teamScores,
       clk: Math.round(game.clock),
       uav: game.uavUntil.map((v) => r2(v)),
+      // Round state, so a client's scoreboard and round banner match the host's.
+      rw: game.roundWins,
+      rd: game.round,
+      rp: game.roundPhase === 'live' ? 1 : 0,
     };
     for (const rec of this.conns.values()) {
       if (!rec.joined) continue;

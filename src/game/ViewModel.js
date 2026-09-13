@@ -246,11 +246,15 @@ export class ViewModel {
     const k = VM_SCALE;
     // Far enough out that the receiver doesn't loom; the sight stays centred
     // either way because the pose is solved from it.
-    // How far the optic ends up from the eye. A pistol is held at arm's
-    // length, and pushing it out there also keeps the forearms from filling
-    // the frame; a scope has to come closer for the eye box to work.
+    //
+    // How far the optic ends up from the eye. A real pistol goes out at arm's
+    // length, and this was posed that way — but a sight half a metre out is a
+    // very small thing to look through, and the forearm ends up filling the
+    // lower half of the frame regardless. Brought in close to a rifle's hold,
+    // the sight picture is large enough to actually use. A scope comes closer
+    // still, for its eye box.
     const adsDist = weapon.sight === 'scope' ? 0.324
-      : PISTOLS.has(weapon.model) ? 0.567 : 0.446;
+      : PISTOLS.has(weapon.model) ? 0.415 : 0.446;
     this.adsPos = new THREE.Vector3(-s.x * k, -s.y * k, -adsDist - s.z * k);
     this.adsRot = new THREE.Euler(0, 0, 0);
 

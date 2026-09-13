@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { WEAPONS, THROWABLES, PERKS, DEFAULT_LOADOUT, weaponList } from '../game/Weapons.js';
 import { buildWeaponModel } from '../game/WeaponModels.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { TEAM_NAMES } from '../game/Game.js';
+import { TEAM_NAMES, RULESETS, DEFAULT_RULESET } from '../game/Game.js';
 import { clamp, clamp01, TAU } from '../core/MathUtils.js';
 import { esc } from './HUD.js';
 
@@ -39,13 +39,19 @@ export function loadProfile() {
   try { p = JSON.parse(localStorage.getItem(STORE) ?? '{}'); } catch { p = {}; }
   const settings = {};
   for (const s of SETTINGS_SCHEMA) settings[s.key] = p.settings?.[s.key] ?? s.def;
-  return {
+  const out = {
     callsign: p.callsign ?? `Operator${(Math.random() * 900 + 100) | 0}`,
     xp: p.xp ?? 0,
     loadout: { ...DEFAULT_LOADOUT, ...(p.loadout ?? {}) },
     settings,
     stats: p.stats ?? { kills: 0, deaths: 0, matches: 0, wins: 0 },
   };
+  // The match options are written into the profile when they change, but were
+  // never read back out, so every one of them reset on reload.
+  for (const k of ['ruleset', 'teamSize', 'scoreLimit', 'timeLimit', 'difficulty']) {
+    if (p[k] !== undefined) out[k] = p[k];
+  }
+  return out;
 }
 
 export function saveProfile(p) {
@@ -104,10 +110,33 @@ export class Menu {
         saveProfile(this.profile);
       });
     }
+
+    const mode = $('#opt-mode');
+    if (this.profile.ruleset && RULESETS[this.profile.ruleset]) mode.value = this.profile.ruleset;
+    const note = document.createElement('p');
+    note.className = 'mode-note';
+    mode.closest('.matchopts').appendChild(note);
+    const syncMode = () => {
+      const r = RULESETS[mode.value] ?? RULESETS[DEFAULT_RULESET];
+      note.textContent = r.desc;
+      // A round mode sets its own clock and has no score limit, so those two
+      // options are shown as inert rather than silently ignored.
+      for (const id of ['opt-scorelimit', 'opt-timelimit']) {
+        $(`#${id}`).closest('label').classList.toggle('dimmed', !!r.rounds);
+      }
+    };
+    mode.addEventListener('change', () => {
+      this.profile.ruleset = mode.value;
+      saveProfile(this.profile);
+      syncMode();
+      this.hooks.sound?.('ui.click');
+    });
+    syncMode();
   }
 
   matchOptions() {
     return {
+      ruleset: $('#opt-mode').value,
       teamSize: Number($('#opt-teamsize').value),
       scoreLimit: Number($('#opt-scorelimit').value),
       timeLimit: Number($('#opt-timelimit').value),

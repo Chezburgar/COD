@@ -117,6 +117,12 @@ kbd{display:inline-block;min-width:1.6em;padding:.12em .42em;margin-right:.25em;
 select,.settings input[type=text]{background:#11161c;border:1px solid var(--line);color:var(--ink);
   padding:.5rem .6rem;font-size:.9rem;outline:none;cursor:pointer}
 select:focus{border-color:var(--accent)}
+/* The mode decides what every other option means, so it leads and spans. */
+.matchopts .opt-mode{grid-column:1/-1}
+.matchopts .opt-mode select{border-color:var(--accent);font-weight:600}
+.matchopts label.dimmed{opacity:.35;pointer-events:none}
+.mode-note{grid-column:1/-1;margin:-.2rem 0 0;font-size:.72rem;color:var(--faint);
+  letter-spacing:.02em;text-transform:none}
 
 /* ── loadout ─────────────────────────────────────────────────────────────── */
 .loadout{display:grid;grid-template-columns:1.15fr 1fr;gap:1.1rem;height:100%}
@@ -257,6 +263,27 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;background:v
 .score-bar{display:flex;height:3px;margin-top:.4rem;background:rgba(255,255,255,.1)}
 .score-bar i{display:block;height:100%;transition:width .4s}
 #score-bar-0{background:var(--t0)} #score-bar-1{background:var(--t1);margin-left:auto}
+
+/* Rounds taken, as pips either side of the round number — a glance has to say
+   how close the match is without reading a number. */
+.round-line{display:flex;align-items:center;justify-content:center;gap:.7rem;margin-top:.35rem}
+.round-label{font-family:var(--mono);font-size:.62rem;letter-spacing:.18em;color:var(--faint)}
+.pips{display:flex;gap:.22rem}
+.pips i{display:block;width:14px;height:4px;background:rgba(255,255,255,.16)}
+.pips.t0 i.on{background:var(--t0)} .pips.t1 i.on{background:var(--t1)}
+.pips.t1{flex-direction:row-reverse}
+
+#round-banner{position:absolute;top:23%;left:0;right:0;display:flex;flex-direction:column;
+  align-items:center;gap:.3rem;pointer-events:none;text-shadow:0 2px 14px rgba(0,0,0,.8)}
+#round-banner b{font-size:2.1rem;letter-spacing:.1em;font-weight:800}
+#round-banner small{font-family:var(--mono);font-size:.72rem;letter-spacing:.16em;color:var(--faint)}
+#round-banner.win b{color:var(--t0)} #round-banner.lose b{color:var(--t1)}
+/* Entry moves the banner, it does not fade it in. An opacity animation that
+   starts at zero leaves the banner invisible for as long as the animation
+   fails to advance — which on a machine struggling for frames is exactly when
+   you most need to be told you lost the round. */
+#round-banner.show{animation:rbin .35s ease-out}
+@keyframes rbin{from{transform:translateY(-12px) scale(.95)}}
 
 #killfeed{position:absolute;top:14px;right:18px;display:flex;flex-direction:column;gap:.22rem;align-items:flex-end}
 .kf{display:flex;align-items:center;gap:.45rem;background:rgba(0,0,0,.5);padding:.22rem .55rem;
